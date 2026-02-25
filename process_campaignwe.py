@@ -125,12 +125,20 @@ def load_file_to_temp_table(con, input_path, temp_table='temp_import'):
         df_cols = pd.read_excel(input_path, nrows=0)
         all_cols = df_cols.columns.tolist()
         timestamp_cols = [col for col in all_cols if 'timestamp' in col.lower()]
+        # GPN columns must be read as string to preserve leading zeros
+        gpn_cols = [col for col in all_cols if col.lower() in ('cp_gpn', 'gpn')]
 
-        # Read Excel with timestamp columns as strings to preserve precision
+        # Read Excel with specific columns forced to string type
+        dtype_dict = {}
         if timestamp_cols:
-            dtype_dict = {col: str for col in timestamp_cols}
-            df = pd.read_excel(input_path, dtype=dtype_dict)
+            dtype_dict.update({col: str for col in timestamp_cols})
             log(f"  Reading timestamp columns as strings: {timestamp_cols}")
+        if gpn_cols:
+            dtype_dict.update({col: str for col in gpn_cols})
+            log(f"  Reading GPN columns as strings: {gpn_cols}")
+
+        if dtype_dict:
+            df = pd.read_excel(input_path, dtype=dtype_dict)
         else:
             df = pd.read_excel(input_path)
 
