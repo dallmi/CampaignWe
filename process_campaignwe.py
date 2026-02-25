@@ -387,6 +387,11 @@ def add_calculated_columns(con, has_hr_history=False):
         # Common HR columns to bring in (if they exist in hr_history)
         hr_field_map = {
             'gcrs_division_desc': 'hr_division',
+            'gcrs_unit_desc': 'hr_unit',
+            'gcrs_area_desc': 'hr_area',
+            'gcrs_sector_desc': 'hr_sector',
+            'gcrs_segment_desc': 'hr_segment',
+            'gcrs_function_desc': 'hr_function',
             'ou_code': 'hr_ou_code',
             'work_location_country': 'hr_country',
             'work_location_region': 'hr_region',

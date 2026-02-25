@@ -189,6 +189,12 @@
         .heatmap-table td { padding: 0.4rem 0.5rem; text-align: center; border: 1px solid var(--white); font-weight: 500; min-width: 60px; }
         .heatmap-table td.row-header { text-align: left; font-weight: 600; background: var(--lighter-gray); min-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
 
+        .breadcrumb { display: flex; align-items: center; gap: 0.25rem; margin-bottom: 0.75rem; font-size: 0.8rem; flex-wrap: wrap; }
+        .breadcrumb-item { color: #0C7EC6; cursor: pointer; text-decoration: underline; }
+        .breadcrumb-item:hover { color: #07476F; }
+        .breadcrumb-sep { color: var(--medium-gray); }
+        .breadcrumb-current { color: var(--dark-gray); font-weight: 600; }
+
         .error-message { background: var(--danger-light); color: var(--danger); padding: 1rem; border-radius: 6px; text-align: center; margin: 2rem; }
 
         @media (max-width: 900px) {
@@ -248,15 +254,15 @@
                 <div class="kpi-grid" id="kpiGrid"></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
-                        <div class="chart-title">Daily Activity <span class="chart-subtitle">Events & unique users over time (CET)</span></div>
+                        <div class="chart-title">Daily Activity <span class="chart-subtitle">Clicks & unique users over time (CET)</span></div>
                         <div class="chart-container tall"><canvas id="chartDailyTrends"></canvas></div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title">Events by Hour <span class="chart-subtitle">CET</span></div>
+                        <div class="chart-title">Clicks by Hour <span class="chart-subtitle">CET</span></div>
                         <div class="chart-container"><canvas id="chartHourly"></canvas></div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title">Events by Weekday <span class="chart-subtitle">CET</span></div>
+                        <div class="chart-title">Clicks by Weekday <span class="chart-subtitle">CET</span></div>
                         <div class="chart-container"><canvas id="chartWeekday"></canvas></div>
                     </div>
                     <div class="chart-card">
@@ -273,21 +279,15 @@
             <!-- TAB 2: Divisions & Regions -->
             <div class="nav-content" id="tabDivisions">
                 <div class="charts-grid">
-                    <div class="chart-card">
-                        <div class="chart-title">Events by Division <span class="chart-subtitle">Top 15 — click to filter</span></div>
-                        <div class="chart-container xtall"><canvas id="chartDivEvents"></canvas></div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">GCRS Hierarchy — Clicks <span class="chart-subtitle">Click bars to drill down</span></div>
+                        <div id="gcrsBreadcrumb" class="breadcrumb"></div>
+                        <div class="chart-container xtall"><canvas id="chartGcrsDrill"></canvas></div>
                     </div>
-                    <div class="chart-card">
-                        <div class="chart-title">Unique Users by Division <span class="chart-subtitle">Top 15</span></div>
-                        <div class="chart-container xtall"><canvas id="chartDivUsers"></canvas></div>
-                    </div>
-                    <div class="chart-card">
-                        <div class="chart-title">Events by Region <span class="chart-subtitle">Click to filter</span></div>
-                        <div class="chart-container tall"><canvas id="chartRegEvents"></canvas></div>
-                    </div>
-                    <div class="chart-card">
-                        <div class="chart-title">Unique Users by Region</div>
-                        <div class="chart-container tall"><canvas id="chartRegUsers"></canvas></div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Region → Country — Clicks <span class="chart-subtitle">Click bars to drill into countries</span></div>
+                        <div id="regionBreadcrumb" class="breadcrumb"></div>
+                        <div class="chart-container xtall"><canvas id="chartRegDrill"></canvas></div>
                     </div>
                     <div class="chart-card full-width">
                         <div class="chart-title">Daily Users — Top 5 Divisions</div>
@@ -407,6 +407,18 @@
         ];
 
         const HEATMAP_STOPS = ['#FFFFFF','#F5F0E1','#E4A911','#E60000','#8A000A'];
+
+        // GCRS hierarchy drilldown
+        const GCRS_LEVELS = ['hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function'];
+        const GCRS_LABELS = ['Division','Unit','Area','Sector','Segment','Function'];
+        let gcrsLevel = 0;
+        let gcrsFilters = [];
+
+        // Region → Country drilldown
+        const REGION_LEVELS = ['hr_region', 'hr_country'];
+        const REGION_LABELS = ['Region', 'Country'];
+        let regionLevel = 0;
+        let regionFilter = null; // selected region name, or null
 
         // =====================================================================
         // INIT
@@ -596,6 +608,86 @@
             return (max && val > max * 0.5) ? '#FFFFFF' : '#404040';
         }
 
+        function formatNumber(num) {
+            if (num === null || num === undefined) return '\u2014';
+            return Number(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
+        }
+
+        function pct(value, total) {
+            if (!total) return '0.0';
+            return (value / total * 100).toFixed(1);
+        }
+
+        function pctArray(values) {
+            const total = values.reduce((a, b) => a + b, 0);
+            return values.map(v => pct(v, total));
+        }
+
+        function barLabelPlugin(values, pcts, options = {}) {
+            const { horizontal = false, minBarSize = 25 } = options;
+            return {
+                afterDatasetsDraw(chart) {
+                    const c = chart.ctx;
+                    c.save();
+                    const meta = chart.getDatasetMeta(0);
+                    meta.data.forEach((bar, i) => {
+                        if (horizontal) {
+                            const barLeft = chart.scales.x.getPixelForValue(0);
+                            const barWidth = bar.x - barLeft;
+                            if (barWidth > 50) {
+                                c.font = '11px -apple-system, sans-serif';
+                                c.fillStyle = '#fff';
+                                c.textBaseline = 'middle';
+                                c.textAlign = 'right';
+                                c.fillText(`${pcts[i]}%`, bar.x - 6, bar.y);
+                            }
+                            c.font = '11px -apple-system, sans-serif';
+                            c.fillStyle = '#5A5D5C';
+                            c.textBaseline = 'middle';
+                            c.textAlign = 'left';
+                            const outsideLabel = barWidth > 50
+                                ? formatNumber(values[i])
+                                : `${formatNumber(values[i])} (${pcts[i]}%)`;
+                            c.fillText(outsideLabel, bar.x + 6, bar.y);
+                        } else {
+                            const barTop = bar.y;
+                            const barBottom = chart.scales.y.getPixelForValue(0);
+                            const barHeight = barBottom - barTop;
+                            c.font = '10px -apple-system, sans-serif';
+                            c.fillStyle = '#5A5D5C';
+                            c.textAlign = 'center';
+                            c.textBaseline = 'bottom';
+                            const topLabel = barHeight > minBarSize
+                                ? formatNumber(values[i])
+                                : `${formatNumber(values[i])} (${pcts[i]}%)`;
+                            c.fillText(topLabel, bar.x, barTop - 4);
+                            if (barHeight > minBarSize) {
+                                c.fillStyle = '#fff';
+                                c.textBaseline = 'top';
+                                c.fillText(`${pcts[i]}%`, bar.x, barTop + 4);
+                            }
+                        }
+                    });
+                    c.restore();
+                }
+            };
+        }
+
+        function doughnutLegendLabels(values, pcts) {
+            return {
+                generateLabels: (chart) => {
+                    const ds = chart.data.datasets[0];
+                    return chart.data.labels.map((label, i) => ({
+                        text: `${label}  ${formatNumber(values[i])} (${pcts[i]}%)`,
+                        fillStyle: ds.backgroundColor[i],
+                        strokeStyle: ds.backgroundColor[i],
+                        hidden: false,
+                        index: i
+                    }));
+                }
+            };
+        }
+
         async function q(sql) { return (await conn.query(sql)).toArray(); }
 
         // =====================================================================
@@ -637,7 +729,7 @@
                 const tasks = [
                     renderKPIs, renderDailyTrends, renderHourly, renderWeekday,
                     renderActions, renderLinkTypes,
-                    renderDivEvents, renderDivUsers, renderRegEvents, renderRegUsers,
+                    renderGcrsDrill, renderRegDrill,
                     renderDivDaily, renderDivDepthTable,
                     renderStoryReads, renderStoryReaders, renderFunnel,
                     renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
@@ -658,16 +750,16 @@
                 SELECT COUNT(*) as events, COUNT(DISTINCT gpn) as users, COUNT(DISTINCT session_key) as sessions,
                        COUNT(DISTINCT story_id) as stories,
                        ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
-                       ROUND(100.0 * SUM(CASE WHEN hr_division IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) as hr_pct
+                       ROUND(100.0 * CAST(SUM(CASE WHEN hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) / COUNT(*), 1) as hr_pct
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const d = data[0] || {};
             document.getElementById('kpiGrid').innerHTML = [
-                kpiCard('TOTAL EVENTS', fmtNum(d.events), 'highlight'),
+                kpiCard('TOTAL CLICKS', fmtNum(d.events), 'highlight'),
                 kpiCard('UNIQUE USERS', fmtNum(d.users), 'info', 'Distinct GPNs'),
                 kpiCard('SESSIONS', fmtNum(d.sessions), 'info'),
                 kpiCard('STORIES VIEWED', fmtNum(d.stories), 'success'),
-                kpiCard('EVENTS / USER', d.events_per_user ?? '-', 'warning'),
+                kpiCard('CLICKS / USER', d.events_per_user ?? '-', 'warning'),
                 kpiCard('HR COVERAGE', (d.hr_pct ?? 0) + '%', 'info'),
             ].join('');
         }
@@ -688,12 +780,12 @@
                 data: {
                     labels: data.map(d => new Date(d.date)),
                     datasets: [
-                        { label: 'Events', data: data.map(d => Number(d.events)), borderColor: COLORS.dark, backgroundColor: 'rgba(64,64,64,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
+                        { label: 'Clicks', data: data.map(d => Number(d.events)), borderColor: COLORS.dark, backgroundColor: 'rgba(64,64,64,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
                         { label: 'Unique Users', data: data.map(d => Number(d.users)), borderColor: '#B8B3A2', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.3, yAxisID: 'y1' }
                     ]
                 },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
-                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { position: 'left', title: { display: true, text: 'Events' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Users' } } }
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { position: 'left', title: { display: true, text: 'Clicks' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Users' } } }
                 }
             });
         }
@@ -703,11 +795,16 @@
                 SELECT event_hour as hour, COUNT(*) as cnt FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY 1
             `);
+            const values = data.map(d => Number(d.cnt));
+            const pcts = pctArray(values);
             destroyChart('hourly');
             charts.hourly = new Chart(document.getElementById('chartHourly').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.hour), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                data: { labels: data.map(d => d.hour), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
+                    scales: { y: { beginAtZero: true } } },
+                plugins: [barLabelPlugin(values, pcts)]
             });
         }
 
@@ -716,11 +813,16 @@
                 SELECT event_weekday as day, event_weekday_num as num, COUNT(*) as cnt FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1, 2 ORDER BY 2
             `);
+            const values = data.map(d => Number(d.cnt));
+            const pcts = pctArray(values);
             destroyChart('weekday');
             charts.weekday = new Chart(document.getElementById('chartWeekday').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.day), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => Number(d.num) <= 5 ? '#5A5D5C' : COLORS.lightGray), borderRadius: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                data: { labels: data.map(d => d.day), datasets: [{ data: values, backgroundColor: data.map(d => Number(d.num) <= 5 ? '#5A5D5C' : COLORS.lightGray), borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
+                    scales: { y: { beginAtZero: true } } },
+                plugins: [barLabelPlugin(values, pcts)]
             });
         }
 
@@ -729,11 +831,18 @@
                 SELECT COALESCE(action_type, '(null)') as action, COUNT(*) as cnt FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
             `);
+            const values = data.map(d => Number(d.cnt));
+            const pcts = pctArray(values);
             destroyChart('actions');
             charts.actions = new Chart(document.getElementById('chartActions').getContext('2d'), {
                 type: 'doughnut',
-                data: { labels: data.map(d => d.action), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } } }
+                data: { labels: data.map(d => d.action), datasets: [{ data: values, backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'right', labels: doughnutLegendLabels(values, pcts) },
+                        tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } }
+                    }
+                }
             });
         }
 
@@ -742,75 +851,190 @@
                 SELECT COALESCE(CP_Link_Type, '(blank)') as lt, COUNT(*) as cnt FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
             `);
+            const values = data.map(d => Number(d.cnt));
+            const pcts = pctArray(values);
             destroyChart('linkTypes');
             charts.linkTypes = new Chart(document.getElementById('chartLinkTypes').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.lt), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+                data: { labels: data.map(d => d.lt), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 80 } },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } },
+                plugins: [barLabelPlugin(values, pcts, { horizontal: true })]
             });
         }
 
         // =====================================================================
         // TAB 2: DIVISIONS & REGIONS
         // =====================================================================
-        async function renderDivEvents() {
+        async function renderGcrsDrill() {
+            const currentCol = GCRS_LEVELS[gcrsLevel];
+            const currentLabel = GCRS_LABELS[gcrsLevel];
+
+            // Build filter clauses from drill path
+            let drillWhere = '';
+            for (const f of gcrsFilters) {
+                drillWhere += ` AND ${GCRS_LEVELS[f.level]} = '${String(f.value).replace(/'/g, "''")}'`;
+            }
+
+            // Check if the current column exists in the data
+            let colExists = true;
+            try { await q(`SELECT ${currentCol} FROM events LIMIT 1`); } catch(e) { colExists = false; }
+
+            if (!colExists) {
+                destroyChart('gcrsDrill');
+                document.getElementById('gcrsBreadcrumb').innerHTML = buildGcrsBreadcrumb(currentLabel) +
+                    `<span style="color:var(--medium-gray);font-style:italic;margin-left:0.5rem">Column "${currentLabel}" not available — re-run process_campaignwe.py to include deeper GCRS levels</span>`;
+                return;
+            }
+
             const data = await q(`
-                SELECT COALESCE(hr_division, '(unknown)') as div, COUNT(*) as cnt FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC LIMIT 15
+                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT gpn) as users
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}${drillWhere}
+                GROUP BY 1 ORDER BY clicks DESC LIMIT 20
             `);
-            destroyChart('divEvents');
-            charts.divEvents = new Chart(document.getElementById('chartDivEvents').getContext('2d'), {
+
+            // Build breadcrumb
+            document.getElementById('gcrsBreadcrumb').innerHTML = buildGcrsBreadcrumb(currentLabel);
+
+            destroyChart('gcrsDrill');
+            const labels = data.map(d => d.name);
+            const values = data.map(d => Number(d.clicks));
+            const users = data.map(d => Number(d.users));
+            const clickPcts = pctArray(values);
+            const userPcts = pctArray(users);
+
+            charts.gcrsDrill = new Chart(document.getElementById('chartGcrsDrill').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 }] },
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
+                        { label: 'Unique Users', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                    ]
+                },
                 options: {
-                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-                    scales: { x: { beginAtZero: true } },
-                    onClick: (evt, elems) => { if (elems.length) { const lbl = data[elems[0].index].div; if (lbl !== '(unknown)') toggleFilter('Division', lbl, 'hr_division'); } }
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { boxWidth: 12 } },
+                        tooltip: { callbacks: { label: ctx => { const p = ctx.datasetIndex === 0 ? clickPcts : userPcts; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${p[ctx.dataIndex]}%)`; } } }
+                    },
+                    scales: { x: { beginAtZero: true, stacked: false }, y: { grid: { display: false } } },
+                    onClick: (evt, elems) => {
+                        if (elems.length && gcrsLevel < GCRS_LEVELS.length - 1) {
+                            const idx = elems[0].index;
+                            const lbl = labels[idx];
+                            if (lbl !== '(unknown)') {
+                                gcrsFilters.push({ level: gcrsLevel, value: lbl });
+                                gcrsLevel++;
+                                renderGcrsDrill();
+                            }
+                        }
+                    }
                 }
             });
         }
 
-        async function renderDivUsers() {
-            const data = await q(`
-                SELECT COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT gpn) as cnt FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC LIMIT 15
-            `);
-            destroyChart('divUsers');
-            charts.divUsers = new Chart(document.getElementById('chartDivUsers').getContext('2d'), {
-                type: 'bar',
-                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
-            });
+        function buildGcrsBreadcrumb(currentLabel) {
+            let html = `<span class="${gcrsLevel === 0 ? 'breadcrumb-current' : 'breadcrumb-item'}" onclick="gcrsNavigateTo(-1)">All</span>`;
+            for (let i = 0; i < gcrsFilters.length; i++) {
+                html += `<span class="breadcrumb-sep">&rsaquo;</span>`;
+                const isCurrent = (i === gcrsFilters.length - 1 && gcrsLevel === gcrsFilters.length);
+                html += `<span class="${isCurrent ? 'breadcrumb-current' : 'breadcrumb-item'}" onclick="gcrsNavigateTo(${i})">${gcrsFilters[i].value}</span>`;
+            }
+            if (gcrsFilters.length > 0) {
+                html += `<span class="breadcrumb-sep">&rsaquo;</span>`;
+                html += `<span class="breadcrumb-current">${currentLabel}</span>`;
+            }
+            return html;
         }
 
-        async function renderRegEvents() {
+        function gcrsNavigateTo(index) {
+            if (index === -1) { gcrsLevel = 0; gcrsFilters = []; }
+            else { gcrsFilters = gcrsFilters.slice(0, index + 1); gcrsLevel = index + 1; }
+            renderGcrsDrill();
+        }
+
+        async function renderRegDrill() {
+            const currentCol = REGION_LEVELS[regionLevel];
+            const currentLabel = REGION_LABELS[regionLevel];
+
+            let drillWhere = '';
+            if (regionFilter) {
+                drillWhere = ` AND hr_region = '${String(regionFilter).replace(/'/g, "''")}'`;
+            }
+
+            // Check if column exists
+            let colExists = true;
+            try { await q(`SELECT ${currentCol} FROM events LIMIT 1`); } catch(e) { colExists = false; }
+
+            if (!colExists) {
+                destroyChart('regDrill');
+                document.getElementById('regionBreadcrumb').innerHTML = buildRegionBreadcrumb(currentLabel) +
+                    `<span style="color:var(--medium-gray);font-style:italic;margin-left:0.5rem">Column "${currentLabel}" not available — re-run process_campaignwe.py</span>`;
+                return;
+            }
+
             const data = await q(`
-                SELECT COALESCE(hr_region, '(unknown)') as reg, COUNT(*) as cnt FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
+                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT gpn) as users
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}${drillWhere}
+                GROUP BY 1 ORDER BY clicks DESC LIMIT 20
             `);
-            destroyChart('regEvents');
-            charts.regEvents = new Chart(document.getElementById('chartRegEvents').getContext('2d'), {
+
+            document.getElementById('regionBreadcrumb').innerHTML = buildRegionBreadcrumb(currentLabel);
+
+            destroyChart('regDrill');
+            const labels = data.map(d => d.name);
+            const values = data.map(d => Number(d.clicks));
+            const users = data.map(d => Number(d.users));
+            const clickPcts = pctArray(values);
+            const userPcts = pctArray(users);
+
+            charts.regDrill = new Chart(document.getElementById('chartRegDrill').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
+                        { label: 'Unique Users', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                    ]
+                },
                 options: {
-                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
-                    scales: { x: { beginAtZero: true } },
-                    onClick: (evt, elems) => { if (elems.length) { const lbl = data[elems[0].index].reg; if (lbl !== '(unknown)') toggleFilter('Region', lbl, 'hr_region'); } }
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'top', labels: { boxWidth: 12 } },
+                        tooltip: { callbacks: { label: ctx => { const p = ctx.datasetIndex === 0 ? clickPcts : userPcts; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${p[ctx.dataIndex]}%)`; } } }
+                    },
+                    scales: { x: { beginAtZero: true, stacked: false }, y: { grid: { display: false } } },
+                    onClick: (evt, elems) => {
+                        if (elems.length && regionLevel === 0) {
+                            const lbl = labels[elems[0].index];
+                            if (lbl !== '(unknown)') {
+                                regionFilter = lbl;
+                                regionLevel = 1;
+                                renderRegDrill();
+                            }
+                        }
+                    }
                 }
             });
         }
 
-        async function renderRegUsers() {
-            const data = await q(`
-                SELECT COALESCE(hr_region, '(unknown)') as reg, COUNT(DISTINCT gpn) as cnt FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
-            `);
-            destroyChart('regUsers');
-            charts.regUsers = new Chart(document.getElementById('chartRegUsers').getContext('2d'), {
-                type: 'bar',
-                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
-            });
+        function buildRegionBreadcrumb(currentLabel) {
+            if (regionLevel === 0) {
+                return `<span class="breadcrumb-current">All Regions</span>`;
+            }
+            let html = `<span class="breadcrumb-item" onclick="regionNavigateTo(-1)">All Regions</span>`;
+            html += `<span class="breadcrumb-sep">&rsaquo;</span>`;
+            html += `<span class="breadcrumb-current">${regionFilter} — ${currentLabel}</span>`;
+            return html;
+        }
+
+        function regionNavigateTo(index) {
+            regionLevel = 0;
+            regionFilter = null;
+            renderRegDrill();
         }
 
         async function renderDivDaily() {
@@ -849,12 +1073,12 @@
                 SELECT COALESCE(hr_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT gpn) as users,
                        ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
                        COUNT(DISTINCT story_id) as stories,
-                       SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads,
-                       SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) as likes,
-                       SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) as shares
+                       CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
+                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY events DESC
             `);
-            const headers = ['Division','Events','Users','Events/User','Stories','Reads','Likes','Shares'];
+            const headers = ['Division','Clicks','Users','Clicks/User','Stories','Reads','Likes','Shares'];
             const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes), Number(d.shares)]);
             tableData.divDepth = { headers, rows };
             document.getElementById('divDepthTable').innerHTML = renderHTMLTable(headers, rows, [false,true,true,true,true,true,true,true]);
@@ -865,15 +1089,21 @@
         // =====================================================================
         async function renderStoryReads() {
             const data = await q(`
-                SELECT story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads FROM events
+                SELECT story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY 1 ORDER BY reads DESC LIMIT 20
             `);
+            const values = data.map(d => Number(d.reads));
+            const pcts = pctArray(values);
             destroyChart('storyReads');
             charts.storyReads = new Chart(document.getElementById('chartStoryReads').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.reads)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 80 } },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } },
+                plugins: [barLabelPlugin(values, pcts, { horizontal: true })]
             });
         }
 
@@ -883,22 +1113,28 @@
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
                 GROUP BY 1 ORDER BY readers DESC LIMIT 20
             `);
+            const values = data.map(d => Number(d.readers));
+            const pcts = pctArray(values);
             destroyChart('storyReaders');
             charts.storyReaders = new Chart(document.getElementById('chartStoryReaders').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.readers)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 80 } },
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } },
+                plugins: [barLabelPlugin(values, pcts, { horizontal: true })]
             });
         }
 
         async function renderFunnel() {
             const data = await q(`
                 SELECT story_id,
-                       SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads,
-                       SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) as hides,
-                       SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) as likes,
-                       SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) as shares,
-                       SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) as vp
+                       CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
+                       CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides,
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
+                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
+                       CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as vp
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY 1 ORDER BY reads DESC LIMIT 10
             `);
@@ -911,10 +1147,14 @@
                 { key: 'shares', label: 'Share', color: CHART_PALETTE[1] },
                 { key: 'vp', label: 'View Prompt', color: CHART_PALETTE[0] }
             ];
+            const funnelTotals = {}; metrics.forEach(m => { funnelTotals[m.key] = data.reduce((s, d) => s + Number(d[m.key]), 0); });
             charts.funnel = new Chart(document.getElementById('chartFunnel').getContext('2d'), {
                 type: 'bar',
                 data: { labels, datasets: metrics.map(m => ({ label: m.label, data: data.map(d => Number(d[m.key])), backgroundColor: m.color, borderRadius: 2 })) },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } }, scales: { y: { beginAtZero: true } } }
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top', labels: { boxWidth: 12 } },
+                        tooltip: { callbacks: { label: ctx => { const t = funnelTotals[metrics[ctx.datasetIndex].key]; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${pct(ctx.raw, t)}%)`; } } } },
+                    scales: { y: { beginAtZero: true } } }
             });
         }
 
@@ -922,7 +1162,7 @@
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10),
                      top_d AS (SELECT hr_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_division as div, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                SELECT hr_division as div, story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_division IN (SELECT * FROM top_d)
                 GROUP BY 1, 2
             `);
@@ -940,7 +1180,7 @@
         async function renderRegStoryHeatmap() {
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_region as reg, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                SELECT hr_region as reg, story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_region IS NOT NULL
                 GROUP BY 1, 2
             `);
@@ -964,7 +1204,7 @@
             if (!sids.length) { destroyChart('storyDaily'); return; }
 
             const data = await q(`
-                SELECT session_date as date, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                SELECT session_date as date, story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (${sids.map(s => `'${s}'`).join(',')})
                 GROUP BY 1, 2 ORDER BY 1
             `);
@@ -978,7 +1218,7 @@
                 type: 'line',
                 data: { labels: dates.map(d => new Date(d)), datasets },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
-                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Read Events' } } } }
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Reads' } } } }
             });
         }
 
@@ -988,18 +1228,23 @@
         async function renderGpnCoverage() {
             const data = await q(`
                 SELECT
-                    SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) as matched,
-                    SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) as unmatched,
-                    SUM(CASE WHEN gpn IS NULL THEN 1 ELSE 0 END) as no_gpn
+                    CAST(SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) as matched,
+                    CAST(SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) AS INTEGER) as unmatched,
+                    CAST(SUM(CASE WHEN gpn IS NULL THEN 1 ELSE 0 END) AS INTEGER) as no_gpn
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const d = data[0];
+            const covValues = [Number(d.matched), Number(d.unmatched), Number(d.no_gpn)];
+            const covPcts = pctArray(covValues);
             destroyChart('gpnCoverage');
             charts.gpnCoverage = new Chart(document.getElementById('chartGpnCoverage').getContext('2d'), {
                 type: 'bar',
                 data: { labels: ['HR Matched', 'GPN but no HR', 'No GPN'],
-                    datasets: [{ data: [Number(d.matched), Number(d.unmatched), Number(d.no_gpn)], backgroundColor: [COLORS.success, COLORS.warning, COLORS.lightGray], borderRadius: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+                    datasets: [{ data: covValues, backgroundColor: [COLORS.success, COLORS.warning, COLORS.lightGray], borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${covPcts[ctx.dataIndex]}%)` } } },
+                    scales: { y: { beginAtZero: true } } },
+                plugins: [barLabelPlugin(covValues, covPcts)]
             });
         }
 
@@ -1008,11 +1253,16 @@
                 SELECT LENGTH(gpn) as len, COUNT(DISTINCT gpn) as cnt FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL GROUP BY 1 ORDER BY 1
             `);
+            const lenValues = data.map(d => Number(d.cnt));
+            const lenPcts = pctArray(lenValues);
             destroyChart('gpnLength');
             charts.gpnLength = new Chart(document.getElementById('chartGpnLength').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Unique GPNs' } } } }
+                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: lenValues, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${lenPcts[ctx.dataIndex]}%)` } } },
+                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Unique GPNs' } } } },
+                plugins: [barLabelPlugin(lenValues, lenPcts)]
             });
         }
 
@@ -1024,14 +1274,14 @@
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL AND hr_division IS NULL
                 GROUP BY gpn ORDER BY events DESC LIMIT 50
             `);
-            const headers = ['GPN','Events','Sessions','First Seen','Last Seen','Sample Email'];
+            const headers = ['GPN','Clicks','Sessions','First Seen','Last Seen','Sample Email'];
             const rows = data.map(d => [d.gpn, Number(d.events), Number(d.sessions), String(d.first_seen).split('T')[0], String(d.last_seen).split('T')[0], d.sample_email || '']);
             tableData.unmatchedGpns = { headers, rows };
             document.getElementById('unmatchedGpnTable').innerHTML = rows.length ? renderHTMLTable(headers, rows, [false,true,true,false,false,false]) : '<p style="padding:1rem;color:var(--medium-gray)">No unmatched GPNs in selected range.</p>';
         }
 
         async function renderFieldCoverage() {
-            const fields = ['gpn','email','session_id','user_id','story_id','action_type','hr_division','hr_region','hr_country','hr_job_family','hr_management_level'];
+            const fields = ['gpn','email','session_id','user_id','story_id','action_type','hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function','hr_region','hr_country','hr_job_family','hr_management_level'];
             // Check which fields exist
             let existingCols;
             try { existingCols = (await q("DESCRIBE events")).map(d => d.column_name); } catch(e) { existingCols = []; }
