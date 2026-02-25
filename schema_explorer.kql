@@ -8,17 +8,13 @@
 // =========================================================================
 // QUERY 0A: Does this AppInsights instance have ANY data in last 24h?
 // =========================================================================
-// If this returns 0 → wrong AppInsights instance or no recent data.
-// =========================================================================
-customEvents
-| where timestamp >= ago(24h)
-| count
+// customEvents
+// | where timestamp >= ago(24h)
+// | count
 
 
 // =========================================================================
 // QUERY 0B: Search ALL customDimensions for 'gwm-prompt-library'
-// =========================================================================
-// Searches the raw JSON string — will find it regardless of key name.
 // =========================================================================
 // customEvents
 // | where timestamp >= ago(7d)
@@ -27,20 +23,20 @@ customEvents
 
 
 // =========================================================================
-// QUERY 0C: Find the key name that holds the page URL
+// QUERY 0C: Find all keys + values from those 0B rows
 // =========================================================================
-// Lists all customDimensions keys and checks which ones contain URL-like values.
+// No name filter — just find any event with gwm-prompt-library in the JSON
+// and show ALL key names so we can see the correct field name.
 // =========================================================================
-// customEvents
-// | where timestamp >= ago(24h)
-// | where name == 'click_event'
-// | extend cd = todynamic(customDimensions)
-// | extend keys = bag_keys(cd)
-// | mv-expand key = keys to typeof(string)
-// | extend val = tostring(cd[key])
-// | where val contains 'http' or key contains_cs 'URL' or key contains_cs 'Url' or key contains_cs 'url' or key contains_cs 'Page'
-// | summarize count(), SampleValue = take_any(val) by tostring(key)
-// | order by count_ desc
+customEvents
+| where timestamp >= ago(7d)
+| where customDimensions has 'gwm-prompt-library'
+| extend cd = todynamic(customDimensions)
+| extend keys = bag_keys(cd)
+| mv-expand key = keys to typeof(string)
+| extend val = tostring(cd[key])
+| summarize count(), SampleValue = take_any(val) by tostring(key)
+| order by count_ desc
 
 
 // =========================================================================
