@@ -7,14 +7,14 @@ for the example.aspx page. It creates/updates a DuckDB database, joins with
 HR data from hr_history.parquet via GPN, and exports Parquet files for reporting.
 
 Usage:
-    python process_campaignwe.py                    # Auto-detect latest file in input/
-    python process_campaignwe.py input/export.xlsx  # Process specific file
+    python process_campaignwe.py                    # Auto-detect latest file in data/
+    python process_campaignwe.py data/export.xlsx   # Process specific file
     python process_campaignwe.py --full-refresh     # Delete DB and reprocess all files
 
-Input folder: input/
+Input folder: data/
     Place your KQL export files here with date suffix _YYYY_MM_DD, e.g.:
-    - campaignwe_export_2025_01_13.xlsx
-    - campaignwe_export_2025_01_13.csv
+    - campaign_export_2026_02_25.xlsx
+    - campaign_export_2026_02_25.csv
 
     The file with the most recent date in the filename will be processed.
 
@@ -706,7 +706,6 @@ def process_campaignwe(input_file=None, full_refresh=False):
         full_refresh: If True, delete DB and reprocess all files
     """
     script_dir = Path(__file__).parent
-    input_dir = script_dir / 'input'
     data_dir = script_dir / 'data'
     output_dir = script_dir / 'output'
     db_path = data_dir / 'campaignwe.db'
@@ -715,7 +714,6 @@ def process_campaignwe(input_file=None, full_refresh=False):
     hr_parquet_path = script_dir.parent / 'SearchAnalytics' / 'output' / 'hr_history.parquet'
 
     # Create directories
-    input_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -729,10 +727,10 @@ def process_campaignwe(input_file=None, full_refresh=False):
             db_path.unlink()
             log("Full refresh: deleted existing database")
 
-        files_to_process = get_all_input_files(input_dir)
+        files_to_process = get_all_input_files(data_dir)
         if not files_to_process:
-            log(f"ERROR: No input files found in {input_dir}")
-            log("Place your KQL export files (xlsx/csv) in the input/ folder")
+            log(f"ERROR: No input files found in {data_dir}")
+            log("Place your KQL export files (xlsx/csv) in the data/ folder")
             sys.exit(1)
         log(f"Full refresh: processing {len(files_to_process)} files")
     elif input_file:
@@ -741,15 +739,15 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log(f"ERROR: File not found: {input_file}")
             sys.exit(1)
     else:
-        latest_file = find_latest_input_file(input_dir)
+        latest_file = find_latest_input_file(data_dir)
         if not latest_file:
-            log(f"ERROR: No input files found in {input_dir}")
-            log("Place your KQL export files (xlsx/csv) in the input/ folder")
+            log(f"ERROR: No input files found in {data_dir}")
+            log("Place your KQL export files (xlsx/csv) in the data/ folder")
             log("Supported formats: .xlsx, .xls, .csv")
-            log("\nFilename format: filename_YYYY_MM_DD.xlsx")
+            log("\nFilename format: campaign_export_YYYY_MM_DD.xlsx")
             log("Example filenames:")
-            log("  campaignwe_export_2025_01_13.xlsx")
-            log("  campaignwe_export_2025_01_13.csv")
+            log("  campaign_export_2026_02_25.xlsx")
+            log("  campaign_export_2026_02_25.csv")
             sys.exit(1)
         files_to_process = [latest_file]
         log(f"Auto-detected latest file: {latest_file.name}")
@@ -796,6 +794,6 @@ if __name__ == "__main__":
 
     if len(sys.argv) == 1:
         print(__doc__)
-        print("\nNo arguments provided - auto-detecting latest file in input/\n")
+        print("\nNo arguments provided - auto-detecting latest file in data/\n")
 
     process_campaignwe(input_file=input_file, full_refresh=full_refresh)

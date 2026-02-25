@@ -4,10 +4,10 @@ Bilder/
 # Data files (too large for git)
 data/*.db
 data/*.db.wal
+data/*.xlsx
+data/*.xls
+data/*.csv
 output/*.parquet
-input/*.xlsx
-input/*.xls
-input/*.csv
 
 # Python
 __pycache__/
