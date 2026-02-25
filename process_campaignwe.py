@@ -760,6 +760,57 @@ def print_summary(con, output_dir=None):
     for _, row in events_df.iterrows():
         log(f"    {row['name']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
 
+    # --- Action type breakdown ---
+    if 'action_type' in events_cols:
+        action_df = con.execute("""
+            SELECT COALESCE(action_type, '(null)') as action_type, COUNT(*) as cnt,
+                   ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) as pct
+            FROM events
+            GROUP BY 1
+            ORDER BY cnt DESC
+        """).df()
+
+        log("\n  ACTION TYPES (from CP_Link_label)")
+        log("  " + "-" * 60)
+        for _, row in action_df.iterrows():
+            log(f"    {row['action_type']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
+
+        # Show sample "Other" labels for refinement
+        other_count = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Other'").fetchone()[0]
+        if other_count > 0:
+            # Find the link label column in events
+            ll_col = next((c for c in ['CP_Link_label', 'CP_link_label'] if c in events_cols), None)
+            if ll_col:
+                other_samples = con.execute(f"""
+                    SELECT "{ll_col}" as label, COUNT(*) as cnt
+                    FROM events
+                    WHERE action_type = 'Other'
+                    GROUP BY 1
+                    ORDER BY cnt DESC
+                    LIMIT 10
+                """).df()
+                if len(other_samples) > 0:
+                    log(f"\n    Sample 'Other' labels ({other_count:,} total):")
+                    for _, row in other_samples.iterrows():
+                        label_preview = str(row['label'])[:60]
+                        log(f"      {label_preview:<60s} {int(row['cnt']):>6,}")
+
+    # --- Link type breakdown ---
+    link_type_col = next((c for c in ['CP_Link_Type', 'CP_link_type', 'CP_LinkType'] if c in events_cols), None)
+    if link_type_col:
+        lt_df = con.execute(f"""
+            SELECT COALESCE("{link_type_col}", '(blank)') as link_type, COUNT(*) as cnt,
+                   ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) as pct
+            FROM events
+            GROUP BY 1
+            ORDER BY cnt DESC
+        """).df()
+
+        log("\n  LINK TYPES (CP_Link_Type)")
+        log("  " + "-" * 60)
+        for _, row in lt_df.iterrows():
+            log(f"    {row['link_type']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
+
     # --- Story engagement ---
     if 'story_id' in events_cols and 'action_type' in events_cols:
         story_stats = con.execute("""
