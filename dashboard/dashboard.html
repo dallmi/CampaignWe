@@ -688,8 +688,8 @@
                 data: {
                     labels: data.map(d => new Date(d.date)),
                     datasets: [
-                        { label: 'Events', data: data.map(d => Number(d.events)), borderColor: COLORS.primary, backgroundColor: 'rgba(230,0,0,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
-                        { label: 'Unique Users', data: data.map(d => Number(d.users)), borderColor: CHART_PALETTE[1], backgroundColor: 'rgba(0,117,158,0.08)', fill: true, tension: 0.3, yAxisID: 'y1' }
+                        { label: 'Events', data: data.map(d => Number(d.events)), borderColor: COLORS.dark, backgroundColor: 'rgba(64,64,64,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
+                        { label: 'Unique Users', data: data.map(d => Number(d.users)), borderColor: '#B8B3A2', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.3, yAxisID: 'y1' }
                     ]
                 },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
@@ -706,7 +706,7 @@
             destroyChart('hourly');
             charts.hourly = new Chart(document.getElementById('chartHourly').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.hour), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: COLORS.primary, borderRadius: 2 }] },
+                data: { labels: data.map(d => d.hour), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
             });
         }
@@ -719,7 +719,7 @@
             destroyChart('weekday');
             charts.weekday = new Chart(document.getElementById('chartWeekday').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.day), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => Number(d.num) <= 5 ? COLORS.primary : COLORS.info), borderRadius: 2 }] },
+                data: { labels: data.map(d => d.day), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => Number(d.num) <= 5 ? '#5A5D5C' : COLORS.lightGray), borderRadius: 2 }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
             });
         }
@@ -745,7 +745,7 @@
             destroyChart('linkTypes');
             charts.linkTypes = new Chart(document.getElementById('chartLinkTypes').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.lt), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: CHART_PALETTE[1], borderRadius: 2 }] },
+                data: { labels: data.map(d => d.lt), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
             });
         }
@@ -761,7 +761,7 @@
             destroyChart('divEvents');
             charts.divEvents = new Chart(document.getElementById('chartDivEvents').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : COLORS.primary), borderRadius: 2 }] },
+                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 }] },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
                     scales: { x: { beginAtZero: true } },
@@ -778,7 +778,7 @@
             destroyChart('divUsers');
             charts.divUsers = new Chart(document.getElementById('chartDivUsers').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[1]), borderRadius: 2 }] },
+                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
             });
         }
@@ -791,7 +791,7 @@
             destroyChart('regEvents');
             charts.regEvents = new Chart(document.getElementById('chartRegEvents').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[0]), borderRadius: 2 }] },
+                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
                     scales: { x: { beginAtZero: true } },
@@ -808,7 +808,7 @@
             destroyChart('regUsers');
             charts.regUsers = new Chart(document.getElementById('chartRegUsers').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[6]), borderRadius: 2 }] },
+                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : '#5A5D5C'), borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
             });
         }
@@ -872,7 +872,7 @@
             destroyChart('storyReads');
             charts.storyReads = new Chart(document.getElementById('chartStoryReads').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.reads)), backgroundColor: COLORS.primary, borderRadius: 2 }] },
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.reads)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
             });
         }
@@ -886,7 +886,7 @@
             destroyChart('storyReaders');
             charts.storyReaders = new Chart(document.getElementById('chartStoryReaders').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.readers)), backgroundColor: CHART_PALETTE[1], borderRadius: 2 }] },
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.readers)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
             });
         }
@@ -905,7 +905,7 @@
             destroyChart('funnel');
             const labels = data.map(d => 'Story ' + d.story_id);
             const metrics = [
-                { key: 'reads', label: 'Read', color: COLORS.primary },
+                { key: 'reads', label: 'Read', color: '#404040' },
                 { key: 'hides', label: 'Hide', color: COLORS.info },
                 { key: 'likes', label: 'Like', color: COLORS.success },
                 { key: 'shares', label: 'Share', color: CHART_PALETTE[1] },
@@ -1011,7 +1011,7 @@
             destroyChart('gpnLength');
             charts.gpnLength = new Chart(document.getElementById('chartGpnLength').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: CHART_PALETTE[0], borderRadius: 2 }] },
+                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Unique GPNs' } } } }
             });
         }
