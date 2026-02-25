@@ -186,7 +186,7 @@ def record_processed_file(con, filepath, file_hash, row_count):
     con.execute("""
         INSERT INTO processed_files (filename, file_hash, row_count, processed_at, date_suffix)
         VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
-    """, [filename, file_hash, row_count, date_suffix])
+    """, [filename, file_hash, int(row_count), date_suffix])
 
 
 def load_file_to_temp_table(con, input_path, temp_table='temp_import'):
