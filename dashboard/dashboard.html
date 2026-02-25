@@ -608,6 +608,13 @@
             return (max && val > max * 0.5) ? '#FFFFFF' : '#404040';
         }
 
+        function toDateStr(v) {
+            const d = v instanceof Date ? v : new Date(v);
+            if (!isNaN(d)) return d.toISOString().split('T')[0];
+            const s = String(v);
+            return s.includes('T') ? s.split('T')[0] : s;
+        }
+
         function formatNumber(num) {
             if (num === null || num === undefined) return '\u2014';
             return Number(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -1091,10 +1098,10 @@
                 GROUP BY 1, 2 ORDER BY 1
             `);
 
-            const dates = [...new Set(data.map(d => String(d.date).split('T')[0]))].sort();
+            const dates = [...new Set(data.map(d => toDateStr(d.date)))].sort();
             const datasets = divNames.map((div, i) => {
                 const divData = data.filter(d => d.div === div);
-                const map = {}; divData.forEach(d => { map[String(d.date).split('T')[0]] = Number(d.users); });
+                const map = {}; divData.forEach(d => { map[toDateStr(d.date)] = Number(d.users); });
                 return { label: div, data: dates.map(dt => map[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
             });
 
@@ -1247,9 +1254,9 @@
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (${sids.map(s => `'${s}'`).join(',')})
                 GROUP BY 1, 2 ORDER BY 1
             `);
-            const dates = [...new Set(data.map(d => String(d.date).split('T')[0]))].sort();
+            const dates = [...new Set(data.map(d => toDateStr(d.date)))].sort();
             const datasets = sids.map((sid, i) => {
-                const m = {}; data.filter(d => d.story_id === sid).forEach(d => { m[String(d.date).split('T')[0]] = Number(d.reads); });
+                const m = {}; data.filter(d => d.story_id === sid).forEach(d => { m[toDateStr(d.date)] = Number(d.reads); });
                 return { label: 'Story ' + sid, data: dates.map(dt => m[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
             });
             destroyChart('storyDaily');
