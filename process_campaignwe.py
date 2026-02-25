@@ -1107,6 +1107,19 @@ def process_campaignwe(input_file=None, full_refresh=False):
     # Print summary
     print_summary(con, output_dir)
 
+    # Cleanup: drop tables that are re-created each run to reduce DB size
+    # hr_history is re-loaded from parquet each run and only needed during the join
+    # events_raw is superseded by the enriched 'events' table
+    log("\nCleaning up intermediate tables...")
+    db_size_before = os.path.getsize(db_path) / (1024 * 1024)
+    con.execute("DROP TABLE IF EXISTS hr_history")
+    con.execute("DROP TABLE IF EXISTS events_raw")
+    con.execute("VACUUM")
+    con.execute("CHECKPOINT")
+    db_size_after = os.path.getsize(db_path) / (1024 * 1024)
+    log(f"  Dropped hr_history and events_raw, vacuumed database")
+    log(f"  Database size: {db_size_before:.1f} MB -> {db_size_after:.1f} MB")
+
     log(f"\nDatabase: {db_path}")
     log(f"Parquet files: {output_dir}")
 
