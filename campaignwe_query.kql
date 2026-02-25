@@ -1,19 +1,18 @@
 // ============================================================================
-// CampaignWe Query - Dynamic JSON Flattening (4 levels)
+// CampaignWe Query - Flatten click_event data for gwm-prompt-library.aspx
 // ============================================================================
 // Purpose: Extract and flatten click_event data from Application Insights
-//          customEvents table for gwm-prompt-library.aspx page with dynamic column generation.
+//          customEvents table for gwm-prompt-library.aspx page.
 //
-// Data Structure (4 nesting levels):
-//   Level 1 - customDimensions -> contains CustomProps (and other top-level keys)
-//   Level 2 - CustomProps sub-objects and flat values
-//   Level 3 - Sub-object fields (nested within CustomProps values)
-//   Level 4 - Deeply nested fields (varies)
+// Data Structure:
+//   Top-level columns: timestamp, name, user_Id, Email, PageURL, session_Id,
+//                      client_CountryOrRegion
+//   customDimensions:  Contains CustomProps (flat key-value pairs)
+//   CustomProps keys:  SiteID, SiteName, PageId, PageName, ComponentName,
+//                      ContentOwner, ContentType, Email, GPN, FileName_Label,
+//                      FileType_Label, Link_Type, Link_address, Link_ancestors
 //
-// Output: All keys become columns dynamically.
-//   - Level 2 flat:  CP_key (e.g. CP_gpn)
-//   - Level 3:       CP_parent_child (e.g. CP_userDetails_department)
-//   - Level 4:       CP_parent_child_grandchild
+// Output: All CustomProps keys become columns with CP_ prefix.
 //
 // HOW TO USE: Copy from "set truncationmaxrecords" to "order by"
 //
@@ -29,54 +28,30 @@ let CustomPropsPrefix = "CP_";
 let ClickData = customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
+    | where PageURL contains 'gwm-prompt-library.aspx'
     | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | serialize
     | extend rowId = row_number()
     // --- Level 1: Separate CustomProps from top-level customDimensions ---
     | extend CustomPropsRaw = tostring(cd.CustomProps)
     | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
     | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
-    // --- Level 2: Expand CustomProps keys ---
+    // --- Level 2: Expand CustomProps keys (flat key-value pairs) ---
     | extend cpKeys = bag_keys(CP)
     | extend cpKeys = iff(array_length(cpKeys) == 0, dynamic(["__no_cp__"]), cpKeys)
     | mv-expand cpKey = cpKeys to typeof(string)
     | extend cpValue = tostring(CP[cpKey])
-    // --- Level 3: Check if CP values contain nested JSON objects ---
-    | extend isNestedL3 = cpKey != "__no_cp__" and isnotempty(cpValue) and cpValue startswith "{"
-    | extend L3Bag = iff(isNestedL3, coalesce(todynamic(cpValue), dynamic({})), dynamic({}))
-    | extend subKeys = bag_keys(L3Bag)
-    | extend subKeys = iff(array_length(subKeys) == 0, dynamic(["__no_sub__"]), subKeys)
-    | mv-expand subKey = subKeys to typeof(string)
-    | extend subValue = iff(subKey != "__no_sub__", tostring(L3Bag[subKey]), "")
-    // --- Level 4: Check if Level 3 values contain nested JSON objects ---
-    | extend isNestedL4 = subKey != "__no_sub__" and isnotempty(subValue) and subValue startswith "{"
-    | extend L4Bag = iff(isNestedL4, coalesce(todynamic(subValue), dynamic({})), dynamic({}))
-    | extend subSubKeys = bag_keys(L4Bag)
-    | extend subSubKeys = iff(array_length(subSubKeys) == 0, dynamic(["__no_subsub__"]), subSubKeys)
-    | mv-expand subSubKey = subSubKeys to typeof(string)
     // --- Build flattened key-value pairs ---
-    // Flat CP value (L2):       CP_key -> value
-    // Nested L3 value:          CP_key_subKey -> value
-    // Nested L4 value:          CP_key_subKey_subSubKey -> value
-    // Fallback:                 if nested but empty/unparseable, keep raw value
-    | extend kvBag = case(
-        cpKey == "__no_cp__", dynamic({}),
-        not(isNestedL3), pack(strcat(CustomPropsPrefix, cpKey), cpValue),
-        subKey == "__no_sub__", pack(strcat(CustomPropsPrefix, cpKey), cpValue),
-        not(isNestedL4), pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
-        subSubKey == "__no_subsub__", pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
-        pack(strcat(CustomPropsPrefix, cpKey, "_", subKey, "_", subSubKey), tostring(L4Bag[subSubKey]))
-      )
+    | extend kvBag = iff(cpKey == "__no_cp__", dynamic({}), pack(strcat(CustomPropsPrefix, cpKey), cpValue))
     // --- Reaggregate back to one row per event ---
-    | summarize take_any(timestamp), take_any(name), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
+    | summarize take_any(timestamp), take_any(name), take_any(PageURL), take_any(Email), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
     | extend finalBag = bag_merge(mainBag, coalesce(merged, dynamic({})));
 ClickData
 | evaluate bag_unpack(finalBag)
 | project-away rowId, mainBag, merged
 | extend ['timestamp [UTC]'] = format_datetime(timestamp, 'dd/MM/yyyy HH:mm:ss.fffffff')
 | project-away timestamp
-| project-reorder ['timestamp [UTC]'], name, client_CountryOrRegion, user_Id, session_Id
+| project-reorder ['timestamp [UTC]'], name, PageURL, Email, client_CountryOrRegion, user_Id, session_Id
 | order by ['timestamp [UTC]'] desc
 // === COPY TO HERE ===
 
@@ -86,7 +61,7 @@ ClickData
 // ============================================================================
 
 // --- QUERY A: Key discovery - find all unique CustomProps keys ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend mainKeys = bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"]))) | mv-expand mainKey = mainKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(cd[mainKey])) by Key = mainKey | order by KeyCount desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend cpKeys = bag_keys(CP) | mv-expand cpKey = cpKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(CP[cpKey])) by Key = cpKey | order by KeyCount desc
 
-// --- QUERY B: Simplified version (no CP_ prefix, no deep nesting) ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name | order by timestamp desc
+// --- QUERY B: Simplified version (no CP_ prefix) ---
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name, PageURL, Email | order by timestamp desc

@@ -1,8 +1,8 @@
 // ============================================================================
 // Schema Explorer - Discover data structure for CampaignWe click events
 // ============================================================================
-// Purpose: Map out the full nesting structure of customDimensions per event
-//          type for click_event on gwm-prompt-library.aspx page.
+// Purpose: Map out the full structure of customDimensions/CustomProps
+//          for click_event on gwm-prompt-library.aspx page.
 //
 // Run each query separately in App Insights > Logs.
 // Adjust TimeRange as needed (shorter = faster, longer = more complete).
@@ -10,26 +10,17 @@
 
 
 // =========================================================================
-// QUERY 1: Full schema map (Level 1 + 2 + 3)
+// QUERY 1: Full schema map (top-level + CustomProps keys)
 // =========================================================================
-// Shows every key path, which level it lives at, whether it contains nested
-// JSON, a sample value, and the count of events that have it.
-//
-// Output columns:
-//   EventType    - the event name (should be click_event)
-//   Level        - 1 (customDimensions), 2 (CustomProps), 3 (sub-object)
-//   KeyPath      - full dot-separated path (e.g. CustomProps.userDetails.department)
-//   IsNestedJSON - true if the value is itself a JSON object (deeper nesting exists)
-//   SampleValue  - one example value (truncated to 200 chars)
-//   EventCount   - how many events contain this key
+// Shows every key, a sample value, and the count of events that have it.
 // =========================================================================
 let TimeRange = 30d;
 customEvents
 | where timestamp >= ago(TimeRange)
 | where name == 'click_event'
+| where PageURL contains 'gwm-prompt-library.aspx'
 | extend cd = todynamic(customDimensions)
-| where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-// --- Level 1: top-level customDimensions keys ---
+// --- CustomDimensions keys (Level 1) ---
 | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
 | extend CustomPropsRaw = tostring(cd.CustomProps)
 | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
@@ -44,15 +35,15 @@ customEvents
     EventCount = count(),
     SampleValue = take_any(L1_value),
     IsNestedJSON = take_any(L1_isNested)
-    by EventType = name, KeyPath = mainKey
-| extend Level = 1
+    by KeyPath = mainKey
+| extend Level = 1, Source = "customDimensions"
 | union (
-    // --- Level 2: CustomProps keys ---
+    // --- CustomProps keys (Level 2) ---
     customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
+    | where PageURL contains 'gwm-prompt-library.aspx'
     | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -65,109 +56,38 @@ customEvents
         EventCount = count(),
         SampleValue = take_any(L2_value),
         IsNestedJSON = take_any(L2_isNested)
-        by EventType = name, KeyPath = strcat("CustomProps.", cpKey)
-    | extend Level = 2
-)
-| union (
-    // --- Level 3: sub-objects within CustomProps ---
-    customEvents
-    | where timestamp >= ago(TimeRange)
-    | where name == 'click_event'
-    | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-    | extend CP = iff(
-        isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
-        todynamic(tostring(cd.CustomProps)),
-        dynamic({}))
-    | extend cpKeys = bag_keys(CP)
-    | mv-expand cpKey = cpKeys to typeof(string)
-    | extend cpValue = tostring(CP[cpKey])
-    | where isnotempty(cpValue) and cpValue startswith "{"
-    | extend subBag = todynamic(cpValue)
-    | extend subKeys = bag_keys(subBag)
-    | mv-expand subKey = subKeys to typeof(string)
-    | extend L3_value = tostring(subBag[subKey])
-    | extend L3_isNested = isnotempty(L3_value) and L3_value startswith "{"
-    | summarize
-        EventCount = count(),
-        SampleValue = take_any(L3_value),
-        IsNestedJSON = take_any(L3_isNested)
-        by EventType = name, KeyPath = strcat("CustomProps.", cpKey, ".", subKey)
-    | extend Level = 3
+        by KeyPath = strcat("CustomProps.", cpKey)
+    | extend Level = 2, Source = "CustomProps"
 )
 | extend SampleValue = substring(SampleValue, 0, 200)
-| project EventType, Level, KeyPath, IsNestedJSON, SampleValue, EventCount
-| order by EventType asc, Level asc, KeyPath asc
+| project Level, Source, KeyPath, IsNestedJSON, SampleValue, EventCount
+| order by Level asc, KeyPath asc
 
 
 // =========================================================================
-// QUERY 2: Compact summary - max nesting depth
+// QUERY 2: Quick event count and top-level column check
 // =========================================================================
-// Quick overview: how deep does the nesting go?
+// Verify what top-level columns are available (PageURL, Email, etc.)
 // =========================================================================
-// let TimeRange = 30d;
 // customEvents
-// | where timestamp >= ago(TimeRange)
+// | where timestamp >= ago(30d)
 // | where name == 'click_event'
-// | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-// | extend CustomPropsRaw = tostring(cd.CustomProps)
-// | extend hasCP = isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{"
-// | extend CP = iff(hasCP, todynamic(CustomPropsRaw), dynamic({}))
-// | extend cpKeys = bag_keys(CP)
-// | mv-expand cpKey = cpKeys to typeof(string)
-// | extend cpValue = tostring(CP[cpKey])
-// | extend hasL3 = isnotempty(cpValue) and cpValue startswith "{"
-// | extend subBag = iff(hasL3, todynamic(cpValue), dynamic({}))
-// | extend subKeys = bag_keys(subBag)
-// | mv-expand subKey = subKeys to typeof(string)
-// | extend subValue = iff(subKey == "", "", tostring(subBag[subKey]))
-// | extend hasL4 = isnotempty(subValue) and subValue startswith "{"
+// | where PageURL contains 'gwm-prompt-library.aspx'
 // | summarize
-//     TotalEvents = dcount(timestamp),
-//     HasCustomProps = countif(hasCP),
-//     HasLevel3 = countif(hasL3),
-//     HasLevel4 = countif(hasL4),
-//     MaxDepth = case(
-//         countif(hasL4) > 0, 4,
-//         countif(hasL3) > 0, 3,
-//         countif(hasCP) > 0, 2,
-//         1),
-//     L1_Keys = make_set(bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"])))),
-//     L2_Keys = make_set(cpKey)
-//     by EventType = name
-// | order by MaxDepth desc, TotalEvents desc
+//     TotalEvents = count(),
+//     UniqueUsers = dcount(user_Id),
+//     UniqueSessions = dcount(session_Id),
+//     SamplePageURL = take_any(PageURL),
+//     SampleEmail = take_any(Email),
+//     HasCustomProps = countif(customDimensions has "CustomProps")
+// | project TotalEvents, UniqueUsers, UniqueSessions, SamplePageURL, SampleEmail, HasCustomProps
 
 
 // =========================================================================
-// QUERY 3: Level 4+ detection - find anything deeper than 3 levels
+// QUERY 3: Sample raw events (see full structure)
 // =========================================================================
-// Run this to check if you need MORE than 3 levels of unnesting.
-// Returns only keys where Level 3 values are themselves JSON objects.
-// If this returns no rows, 3 levels is sufficient.
-// =========================================================================
-// let TimeRange = 30d;
 // customEvents
-// | where timestamp >= ago(TimeRange)
+// | where timestamp >= ago(7d)
 // | where name == 'click_event'
-// | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-// | extend CP = iff(
-//     isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
-//     todynamic(tostring(cd.CustomProps)),
-//     dynamic({}))
-// | extend cpKeys = bag_keys(CP)
-// | mv-expand cpKey = cpKeys to typeof(string)
-// | extend cpValue = tostring(CP[cpKey])
-// | where isnotempty(cpValue) and cpValue startswith "{"
-// | extend subBag = todynamic(cpValue)
-// | extend subKeys = bag_keys(subBag)
-// | mv-expand subKey = subKeys to typeof(string)
-// | extend subValue = tostring(subBag[subKey])
-// | where isnotempty(subValue) and subValue startswith "{"
-// | summarize
-//     EventCount = count(),
-//     SampleValue = take_any(substring(subValue, 0, 300))
-//     by EventType = name,
-//        KeyPath = strcat("CustomProps.", cpKey, ".", subKey)
-// | order by EventCount desc
+// | where PageURL contains 'gwm-prompt-library.aspx'
+// | take 10

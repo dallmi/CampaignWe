@@ -350,14 +350,13 @@ def add_calculated_columns(con, has_hr_history=False):
     has_timestamp = 'timestamp' in col_names
 
     # --- Dynamic column resolution ---
-    # GPN field (for HR join) - check various possible column names
-    gpn_candidates = [c for c in ['CP_gpn', 'CP_GPN', 'CP_userDetails_gpn',
-                                   'CP_user_gpn', 'gpn', 'GPN'] if c in col_names]
+    # GPN field (for HR join) - top-level Email/GPN come from App Insights export,
+    # CP_GPN/CP_Email come from CustomProps flattening
+    gpn_candidates = [c for c in ['CP_GPN', 'CP_gpn', 'GPN', 'gpn'] if c in col_names]
     gpn_expr = f"CAST(COALESCE({', '.join(gpn_candidates)}) AS VARCHAR)" if gpn_candidates else 'NULL'
 
-    # Email field (fallback identifier)
-    email_candidates = [c for c in ['CP_email', 'CP_Email', 'CP_userDetails_email',
-                                     'CP_user_email', 'email'] if c in col_names]
+    # Email field - top-level Email column exists in this dataset
+    email_candidates = [c for c in ['Email', 'email', 'CP_Email', 'CP_email'] if c in col_names]
     email_expr = f"COALESCE({', '.join(email_candidates)})" if email_candidates else 'NULL'
 
     # Log resolution
