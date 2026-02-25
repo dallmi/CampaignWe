@@ -280,7 +280,7 @@ The interactive dashboard at `dashboard/dashboard.html` loads the Parquet files 
 
 ### Filters
 
-- Date range presets (7d, 30d, this month, last month, YTD, all time, custom)
+- Date range presets (7d, 14d, 30d, this month, last month, YTD, all time, custom)
 - Click-to-filter on Action Types (doughnut) and Link Types (bar) charts
 - Division/region drill-down filters with visual tags
 
