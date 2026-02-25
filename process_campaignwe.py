@@ -22,6 +22,7 @@ Output:
     - data/campaignwe.db                (DuckDB database)
     - output/events_raw.parquet         (all event-level data with HR fields)
     - output/events_daily.parquet       (aggregated by day)
+    - output/events_story.parquet       (story engagement by day, division, region)
 
 Primary Key: timestamp + user_id + session_id + name
     On conflict, the latest file's data takes precedence.
@@ -426,6 +427,29 @@ def add_calculated_columns(con, has_hr_history=False):
     # Build the main query with all calculated columns
     hr_select = f",\n            {hr_coalesce_sql}" if hr_coalesce_sql else ''
 
+    # Resolve CP_Link_label column name
+    link_label_candidates = [c for c in ['CP_Link_label', 'CP_link_label', 'Link_label'] if c in col_names]
+    link_label_col = link_label_candidates[0] if link_label_candidates else None
+    if link_label_col:
+        log(f"  Link label column: {link_label_col}")
+        story_sql = f"""
+            -- Story parsing from {link_label_col}
+            CAST(regexp_extract(r."{link_label_col}", '(\d+)', 1) AS VARCHAR) as story_id,
+            CASE
+                WHEN r."{link_label_col}" ILIKE 'Read story%' OR r."{link_label_col}" ILIKE '%Show More%' THEN 'Read'
+                WHEN r."{link_label_col}" ILIKE 'hide story%' OR r."{link_label_col}" ILIKE '%Show Less%' THEN 'Hide'
+                WHEN r."{link_label_col}" ILIKE 'View Prompt%' THEN 'View Prompt'
+                WHEN r."{link_label_col}" ILIKE '%like%' THEN 'Like'
+                WHEN r."{link_label_col}" ILIKE '%share%' THEN 'Share'
+                WHEN r."{link_label_col}" IS NULL OR TRIM(r."{link_label_col}") = '' THEN NULL
+                ELSE 'Other'
+            END as action_type,"""
+    else:
+        log("  WARNING: No Link_label column found — story parsing skipped")
+        story_sql = """
+            NULL::VARCHAR as story_id,
+            NULL::VARCHAR as action_type,"""
+
     con.execute(f"""
         CREATE TABLE events AS
         SELECT
@@ -433,6 +457,7 @@ def add_calculated_columns(con, has_hr_history=False):
             -- GPN and email extracted for reference
             {gpn_expr} as gpn,
             {email_expr} as email,
+            {story_sql}
             -- Timestamp as string for reporting (UTC)
             STRFTIME(r.timestamp, '%Y-%m-%d %H:%M:%S.%g') as timestamp_str,
             -- CET timestamp (convert UTC to Europe/Berlin)
@@ -575,6 +600,45 @@ def export_parquet_files(con, output_dir):
     daily_count = con.execute("SELECT COUNT(*) as n FROM events_daily").df()['n'][0]
     log(f"  events_daily.parquet ({daily_count} days)")
 
+    # Story-level aggregation (engagement per story with HR dimensions)
+    if 'story_id' in events_cols and 'action_type' in events_cols:
+        story_file = output_dir / 'events_story.parquet'
+        if story_file.exists():
+            story_file.unlink()
+
+        hr_story_cols = []
+        if 'hr_division' in events_cols:
+            hr_story_cols.append("hr_division")
+        if 'hr_region' in events_cols:
+            hr_story_cols.append("hr_region")
+
+        hr_story_group = ', ' + ', '.join(hr_story_cols) if hr_story_cols else ''
+        hr_story_select = hr_story_group
+
+        con.execute(f"""
+            CREATE OR REPLACE TABLE events_story AS
+                SELECT
+                    story_id,
+                    session_date as date
+                    {hr_story_select},
+                    COUNT(*) as total_events,
+                    COUNT(DISTINCT gpn) as unique_users,
+                    COUNT(DISTINCT session_key) as unique_sessions,
+                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
+                    COUNT(CASE WHEN action_type = 'Hide' THEN 1 END) as hides,
+                    COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
+                    COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares,
+                    COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
+                    COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
+                FROM events
+                WHERE story_id IS NOT NULL AND story_id != ''
+                GROUP BY story_id, session_date {hr_story_group}
+                ORDER BY story_id, session_date {hr_story_group}
+        """)
+        con.execute(f"COPY events_story TO '{story_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+        story_count = con.execute("SELECT COUNT(*) as n FROM events_story").df()['n'][0]
+        log(f"  events_story.parquet ({story_count:,} rows)")
+
 
 def print_summary(con, output_dir=None):
     """Print comprehensive processing summary."""
@@ -664,7 +728,7 @@ def print_summary(con, output_dir=None):
     log("\n  FIELD COVERAGE (non-null values)")
     log("  " + "-" * 60)
     total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-    check_fields = ['gpn', 'email', 'session_id', 'user_id']
+    check_fields = ['gpn', 'email', 'session_id', 'user_id', 'story_id', 'action_type']
     # Add any HR fields
     for col in events_cols:
         if col.startswith('hr_'):
@@ -693,6 +757,53 @@ def print_summary(con, output_dir=None):
     log("  " + "-" * 60)
     for _, row in events_df.iterrows():
         log(f"    {row['name']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
+
+    # --- Story engagement ---
+    if 'story_id' in events_cols and 'action_type' in events_cols:
+        story_stats = con.execute("""
+            SELECT
+                COUNT(DISTINCT story_id) as unique_stories,
+                COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
+                COUNT(CASE WHEN action_type = 'Hide' THEN 1 END) as hides,
+                COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
+                COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares,
+                COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
+                COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
+            FROM events
+            WHERE story_id IS NOT NULL AND story_id != ''
+        """).df().iloc[0]
+
+        log("\n  STORY ENGAGEMENT")
+        log("  " + "-" * 60)
+        log(f"    Unique stories:    {int(story_stats['unique_stories']):,}")
+        log(f"    Reads:             {int(story_stats['reads']):,}")
+        log(f"    Hides:             {int(story_stats['hides']):,}")
+        log(f"    Likes:             {int(story_stats['likes']):,}")
+        log(f"    Shares:            {int(story_stats['shares']):,}")
+        log(f"    View Prompts:      {int(story_stats['view_prompts']):,}")
+        if int(story_stats['other_actions']) > 0:
+            log(f"    Other:             {int(story_stats['other_actions']):,}")
+
+        # Top stories by reads
+        top_stories = con.execute("""
+            SELECT
+                story_id,
+                COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
+                COUNT(DISTINCT gpn) as unique_readers,
+                COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
+                COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares
+            FROM events
+            WHERE story_id IS NOT NULL AND story_id != ''
+            GROUP BY story_id
+            ORDER BY reads DESC
+            LIMIT 10
+        """).df()
+
+        if len(top_stories) > 0:
+            log("\n    Top stories by reads:")
+            log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
+            for _, row in top_stories.iterrows():
+                log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
 
     log("\n" + "=" * 64)
 
