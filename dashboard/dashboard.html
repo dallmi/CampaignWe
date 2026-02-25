@@ -266,6 +266,10 @@
                         <div class="chart-title">Clicks by Weekday <span class="chart-subtitle">CET</span></div>
                         <div class="chart-container"><canvas id="chartWeekday"></canvas></div>
                     </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Activity Heatmap <span class="chart-subtitle">Weekday × Hour (CET)</span></div>
+                        <div class="table-container" id="weekdayHourlyHeatmap"></div>
+                    </div>
                     <div class="chart-card">
                         <div class="chart-title">Action Types</div>
                         <div class="chart-container"><canvas id="chartActions"></canvas></div>
@@ -777,7 +781,7 @@
             try {
                 const tasks = [
                     renderKPIs, renderDailyTrends, renderHourly, renderWeekday,
-                    renderActions, renderLinkTypes,
+                    renderWeekdayHourly, renderActions, renderLinkTypes,
                     renderGcrsDrill, renderRegDrill,
                     renderDivDaily, renderDivDepthTable,
                     renderStoryReads, renderStoryReaders, renderFunnel,
@@ -873,6 +877,28 @@
                     scales: { y: { beginAtZero: true } } },
                 plugins: [barLabelPlugin(values, pcts)]
             });
+        }
+
+        async function renderWeekdayHourly() {
+            const data = await q(`
+                SELECT event_weekday_num as wday, event_weekday as wday_name,
+                       event_hour as hour, COUNT(*) as cnt
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}
+                GROUP BY 1, 2, 3
+            `);
+            const dayLabels = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+            const hourLabels = Array.from({length: 24}, (_, i) => i);
+            const map = {};
+            let maxVal = 1;
+            data.forEach(d => {
+                const key = d.wday + '_' + d.hour;
+                const v = Number(d.cnt);
+                map[key] = v;
+                if (v > maxVal) maxVal = v;
+            });
+            const getValue = (ri, ci) => map[(ri + 1) + '_' + ci] || 0;
+            document.getElementById('weekdayHourlyHeatmap').innerHTML =
+                renderHeatmapTable(dayLabels, hourLabels, getValue, maxVal);
         }
 
         async function renderActions() {

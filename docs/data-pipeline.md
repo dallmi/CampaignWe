@@ -273,7 +273,7 @@ The interactive dashboard at `dashboard/dashboard.html` loads the Parquet files 
 
 ### Tabs
 
-1. **Overview** -- KPIs, daily trends, hourly/weekday distributions, action types, link types
+1. **Overview** -- KPIs, daily trends, hourly/weekday distributions, weekday × hour heatmap, action types, link types
 2. **Divisions & Regions** -- 6-level GCRS hierarchy drilldown, regional breakdown, engagement depth table
 3. **Stories** -- Top stories, engagement funnel, division/region heatmaps
 4. **Data Quality** -- GPN-HR mapping coverage, field null rates, unmatched GPNs
