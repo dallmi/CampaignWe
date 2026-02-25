@@ -2,108 +2,40 @@
 // Schema Explorer - Discover data structure for CampaignWe click events
 // ============================================================================
 // Run each query separately in App Insights > Logs.
+//
+// KEY FINDING: customDimensions has only ONE key: "CustomProps".
+// All fields (PageURL, Email, GPN, etc.) are inside CustomProps.
+// Access pattern:  cd = todynamic(customDimensions)
+//                  CP = todynamic(tostring(cd.CustomProps))
+//                  then CP.PageURL, CP.Email, CP.GPN, etc.
 // ============================================================================
 
 
 // =========================================================================
-// QUERY 0A: Does this AppInsights instance have ANY data in last 24h?
-// =========================================================================
-// customEvents
-// | where timestamp >= ago(24h)
-// | count
-
-
-// =========================================================================
-// QUERY 0B: Search ALL customDimensions for 'gwm-prompt-library'
-// =========================================================================
-// customEvents
-// | where timestamp >= ago(7d)
-// | where customDimensions has 'gwm-prompt-library'
-// | take 5
-
-
-// =========================================================================
-// QUERY 0C: Find all keys + values from those 0B rows
-// =========================================================================
-// No name filter — just find any event with gwm-prompt-library in the JSON
-// and show ALL key names so we can see the correct field name.
+// QUERY 0: Find event names for gwm-prompt-library page
 // =========================================================================
 customEvents
 | where timestamp >= ago(7d)
-| where customDimensions has 'gwm-prompt-library'
 | extend cd = todynamic(customDimensions)
-| extend keys = bag_keys(cd)
-| mv-expand key = keys to typeof(string)
-| extend val = tostring(cd[key])
-| summarize count(), SampleValue = take_any(val) by tostring(key)
+| extend CP = todynamic(tostring(cd.CustomProps))
+| where tostring(CP.PageURL) contains 'gwm-prompt-library'
+| summarize count() by name
 | order by count_ desc
 
 
 // =========================================================================
-// QUERY 0D: Original diagnostic (no name filter, PageURL in customDimensions)
+// QUERY 1: All CustomProps keys with sample values
 // =========================================================================
 // customEvents
-// | where timestamp >= ago(24h)
+// | where timestamp >= ago(7d)
 // | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'gwm-prompt-library'
-// | summarize count() by name
-// | order by count_ desc
-
-
-// =========================================================================
-// QUERY 1: Full schema map (top-level + CustomProps keys)
-// =========================================================================
-// Shows every key, a sample value, and the count of events that have it.
-// Adjust TimeRange and name filter based on QUERY 0 results.
-// =========================================================================
-// let TimeRange = 30d;
-// customEvents
-// | where timestamp >= ago(TimeRange)
-// | where name == 'click_event'
-// | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-// // --- CustomDimensions keys (Level 1) ---
-// | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
-// | extend CustomPropsRaw = tostring(cd.CustomProps)
-// | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
-// | extend mainKeys = bag_keys(mainBag)
+// | extend CP = todynamic(tostring(cd.CustomProps))
+// | where tostring(CP.PageURL) contains 'gwm-prompt-library'
 // | extend cpKeys = bag_keys(CP)
-// // Expand Level 1 keys
-// | mv-expand mainKey = mainKeys to typeof(string)
-// | extend L1_value = tostring(mainBag[mainKey])
-// | extend L1_isNested = isnotempty(L1_value) and L1_value startswith "{"
-// // Summarize Level 1
-// | summarize
-//     EventCount = count(),
-//     SampleValue = take_any(L1_value),
-//     IsNestedJSON = take_any(L1_isNested)
-//     by KeyPath = mainKey
-// | extend Level = 1, Source = "customDimensions"
-// | union (
-//     // --- CustomProps keys (Level 2) ---
-//     customEvents
-//     | where timestamp >= ago(TimeRange)
-//     | where name == 'click_event'
-//     | extend cd = todynamic(customDimensions)
-//     | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
-//     | extend CP = iff(
-//         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
-//         todynamic(tostring(cd.CustomProps)),
-//         dynamic({}))
-//     | extend cpKeys = bag_keys(CP)
-//     | mv-expand cpKey = cpKeys to typeof(string)
-//     | extend L2_value = tostring(CP[cpKey])
-//     | extend L2_isNested = isnotempty(L2_value) and L2_value startswith "{"
-//     | summarize
-//         EventCount = count(),
-//         SampleValue = take_any(L2_value),
-//         IsNestedJSON = take_any(L2_isNested)
-//         by KeyPath = strcat("CustomProps.", cpKey)
-//     | extend Level = 2, Source = "CustomProps"
-// )
-// | extend SampleValue = substring(SampleValue, 0, 200)
-// | project Level, Source, KeyPath, IsNestedJSON, SampleValue, EventCount
-// | order by Level asc, KeyPath asc
+// | mv-expand cpKey = cpKeys to typeof(string)
+// | extend cpValue = tostring(CP[cpKey])
+// | summarize KeyCount = count(), SampleValue = take_any(cpValue) by Key = tostring(cpKey)
+// | order by KeyCount desc
 
 
 // =========================================================================
@@ -111,7 +43,7 @@ customEvents
 // =========================================================================
 // customEvents
 // | where timestamp >= ago(7d)
-// | where name == 'click_event'
 // | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
+// | extend CP = todynamic(tostring(cd.CustomProps))
+// | where tostring(CP.PageURL) contains 'gwm-prompt-library'
 // | take 10
