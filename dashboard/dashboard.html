@@ -280,7 +280,7 @@
             <div class="nav-content" id="tabDivisions">
                 <div class="charts-grid">
                     <div class="chart-card full-width">
-                        <div class="chart-title">GCRS Hierarchy — Clicks <span class="chart-subtitle">Click bars to drill down</span></div>
+                        <div class="chart-title">Business Division — Clicks <span class="chart-subtitle">Click bars to drill down</span></div>
                         <div id="gcrsBreadcrumb" class="breadcrumb"></div>
                         <div class="chart-container xtall"><canvas id="chartGcrsDrill"></canvas></div>
                     </div>
@@ -673,6 +673,41 @@
             };
         }
 
+        function groupedBarLabelPlugin(datasets, horizontal = true) {
+            // datasets: [{ values: [...], pcts: [...] }, ...]
+            return {
+                afterDatasetsDraw(chart) {
+                    const c = chart.ctx;
+                    c.save();
+                    datasets.forEach((ds, di) => {
+                        const meta = chart.getDatasetMeta(di);
+                        meta.data.forEach((bar, i) => {
+                            if (horizontal) {
+                                const barLeft = chart.scales.x.getPixelForValue(0);
+                                const barWidth = bar.x - barLeft;
+                                if (barWidth > 50) {
+                                    c.font = '10px -apple-system, sans-serif';
+                                    c.fillStyle = '#fff';
+                                    c.textBaseline = 'middle';
+                                    c.textAlign = 'right';
+                                    c.fillText(`${ds.pcts[i]}%`, bar.x - 4, bar.y);
+                                }
+                                c.font = '10px -apple-system, sans-serif';
+                                c.fillStyle = '#5A5D5C';
+                                c.textBaseline = 'middle';
+                                c.textAlign = 'left';
+                                const outsideLabel = barWidth > 50
+                                    ? formatNumber(ds.values[i])
+                                    : `${formatNumber(ds.values[i])} (${ds.pcts[i]}%)`;
+                                c.fillText(outsideLabel, bar.x + 4, bar.y);
+                            }
+                        });
+                    });
+                    c.restore();
+                }
+            };
+        }
+
         function doughnutLegendLabels(values, pcts) {
             return {
                 generateLabels: (chart) => {
@@ -916,11 +951,12 @@
                 },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 90 } },
                     plugins: {
                         legend: { position: 'top', labels: { boxWidth: 12 } },
                         tooltip: { callbacks: { label: ctx => { const p = ctx.datasetIndex === 0 ? clickPcts : userPcts; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${p[ctx.dataIndex]}%)`; } } }
                     },
-                    scales: { x: { beginAtZero: true, stacked: false }, y: { grid: { display: false } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } },
                     onClick: (evt, elems) => {
                         if (elems.length && gcrsLevel < GCRS_LEVELS.length - 1) {
                             const idx = elems[0].index;
@@ -932,7 +968,8 @@
                             }
                         }
                     }
-                }
+                },
+                plugins: [groupedBarLabelPlugin([{ values, pcts: clickPcts }, { values: users, pcts: userPcts }])]
             });
         }
 
@@ -1002,11 +1039,12 @@
                 },
                 options: {
                     indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 90 } },
                     plugins: {
                         legend: { position: 'top', labels: { boxWidth: 12 } },
                         tooltip: { callbacks: { label: ctx => { const p = ctx.datasetIndex === 0 ? clickPcts : userPcts; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${p[ctx.dataIndex]}%)`; } } }
                     },
-                    scales: { x: { beginAtZero: true, stacked: false }, y: { grid: { display: false } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } },
                     onClick: (evt, elems) => {
                         if (elems.length && regionLevel === 0) {
                             const lbl = labels[elems[0].index];
@@ -1017,7 +1055,8 @@
                             }
                         }
                     }
-                }
+                },
+                plugins: [groupedBarLabelPlugin([{ values, pcts: clickPcts }, { values: users, pcts: userPcts }])]
             });
         }
 
