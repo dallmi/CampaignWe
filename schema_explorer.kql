@@ -2,7 +2,7 @@
 // Schema Explorer - Discover data structure for CampaignWe click events
 // ============================================================================
 // Purpose: Map out the full nesting structure of customDimensions per event
-//          type for click_event on example.aspx page.
+//          type for click_event on gwm-prompt-library.aspx page.
 //
 // Run each query separately in App Insights > Logs.
 // Adjust TimeRange as needed (shorter = faster, longer = more complete).
@@ -28,7 +28,7 @@ customEvents
 | where timestamp >= ago(TimeRange)
 | where name == 'click_event'
 | extend cd = todynamic(customDimensions)
-| where tostring(cd.PageURL) contains 'example.aspx'
+| where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // --- Level 1: top-level customDimensions keys ---
 | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
 | extend CustomPropsRaw = tostring(cd.CustomProps)
@@ -52,7 +52,7 @@ customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
     | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'example.aspx'
+    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -74,7 +74,7 @@ customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
     | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'example.aspx'
+    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -110,7 +110,7 @@ customEvents
 // | where timestamp >= ago(TimeRange)
 // | where name == 'click_event'
 // | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'example.aspx'
+// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // | extend CustomPropsRaw = tostring(cd.CustomProps)
 // | extend hasCP = isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{"
 // | extend CP = iff(hasCP, todynamic(CustomPropsRaw), dynamic({}))
@@ -151,7 +151,7 @@ customEvents
 // | where timestamp >= ago(TimeRange)
 // | where name == 'click_event'
 // | extend cd = todynamic(customDimensions)
-// | where tostring(cd.PageURL) contains 'example.aspx'
+// | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // | extend CP = iff(
 //     isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
 //     todynamic(tostring(cd.CustomProps)),

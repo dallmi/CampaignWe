@@ -2,7 +2,7 @@
 // CampaignWe Query - Dynamic JSON Flattening (4 levels)
 // ============================================================================
 // Purpose: Extract and flatten click_event data from Application Insights
-//          customEvents table for example.aspx page with dynamic column generation.
+//          customEvents table for gwm-prompt-library.aspx page with dynamic column generation.
 //
 // Data Structure (4 nesting levels):
 //   Level 1 - customDimensions -> contains CustomProps (and other top-level keys)
@@ -30,7 +30,7 @@ let ClickData = customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
     | extend cd = todynamic(customDimensions)
-    | where tostring(cd.PageURL) contains 'example.aspx'
+    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | serialize
     | extend rowId = row_number()
     // --- Level 1: Separate CustomProps from top-level customDimensions ---
@@ -86,7 +86,7 @@ ClickData
 // ============================================================================
 
 // --- QUERY A: Key discovery - find all unique CustomProps keys ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'example.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend mainKeys = bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"]))) | mv-expand mainKey = mainKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(cd[mainKey])) by Key = mainKey | order by KeyCount desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend mainKeys = bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"]))) | mv-expand mainKey = mainKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(cd[mainKey])) by Key = mainKey | order by KeyCount desc
 
 // --- QUERY B: Simplified version (no CP_ prefix, no deep nesting) ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'example.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name | order by timestamp desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name | order by timestamp desc
