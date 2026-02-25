@@ -6,16 +6,52 @@
 
 
 // =========================================================================
-// QUERY 0: DIAGNOSTIC - Find all events for this page (no name filter)
+// QUERY 0A: Does this AppInsights instance have ANY data in last 24h?
 // =========================================================================
-// Run this FIRST to discover what event names exist for this page.
+// If this returns 0 → wrong AppInsights instance or no recent data.
 // =========================================================================
 customEvents
 | where timestamp >= ago(24h)
-| extend cd = todynamic(customDimensions)
-| where tostring(cd.PageURL) contains 'gwm-prompt-library'
-| summarize count() by name
-| order by count_ desc
+| count
+
+
+// =========================================================================
+// QUERY 0B: Search ALL customDimensions for 'gwm-prompt-library'
+// =========================================================================
+// Searches the raw JSON string — will find it regardless of key name.
+// =========================================================================
+// customEvents
+// | where timestamp >= ago(7d)
+// | where customDimensions has 'gwm-prompt-library'
+// | take 5
+
+
+// =========================================================================
+// QUERY 0C: Find the key name that holds the page URL
+// =========================================================================
+// Lists all customDimensions keys and checks which ones contain URL-like values.
+// =========================================================================
+// customEvents
+// | where timestamp >= ago(24h)
+// | where name == 'click_event'
+// | extend cd = todynamic(customDimensions)
+// | extend keys = bag_keys(cd)
+// | mv-expand key = keys to typeof(string)
+// | extend val = tostring(cd[key])
+// | where val contains 'http' or key contains_cs 'URL' or key contains_cs 'Url' or key contains_cs 'url' or key contains_cs 'Page'
+// | summarize count(), SampleValue = take_any(val) by tostring(key)
+// | order by count_ desc
+
+
+// =========================================================================
+// QUERY 0D: Original diagnostic (no name filter, PageURL in customDimensions)
+// =========================================================================
+// customEvents
+// | where timestamp >= ago(24h)
+// | extend cd = todynamic(customDimensions)
+// | where tostring(cd.PageURL) contains 'gwm-prompt-library'
+// | summarize count() by name
+// | order by count_ desc
 
 
 // =========================================================================
