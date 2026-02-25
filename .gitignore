@@ -1,12 +1,16 @@
 # Images / screenshots
 Bilder/
 
-# Data files (too large for git)
+# Input files (KQL exports, too large for git)
+input/*.xlsx
+input/*.xls
+input/*.csv
+
+# Data files (DuckDB)
 data/*.db
 data/*.db.wal
-data/*.xlsx
-data/*.xls
-data/*.csv
+
+# Output files
 output/*.parquet
 
 # Python
