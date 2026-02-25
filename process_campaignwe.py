@@ -7,8 +7,8 @@ for the example.aspx page. It creates/updates a DuckDB database, joins with
 HR data from hr_history.parquet via GPN, and exports Parquet files for reporting.
 
 Usage:
-    python process_campaignwe.py                     # Auto-detect latest file in input/
-    python process_campaignwe.py input/export.xlsx   # Process specific file
+    python process_campaignwe.py                     # Process only new/changed files (delta)
+    python process_campaignwe.py input/export.xlsx   # Force-process a specific file
     python process_campaignwe.py --full-refresh      # Delete DB and reprocess all files
 
 Input folder: input/
@@ -16,7 +16,8 @@ Input folder: input/
     - campaign_export_2026_02_25.xlsx
     - campaign_export_2026_02_25.csv
 
-    The file with the most recent date in the filename will be processed.
+    Only new or modified files are processed (tracked via SHA-256 hash).
+    Overlapping time ranges are handled via upsert on the primary key.
 
 Output:
     - data/campaignwe.db                (DuckDB database)
@@ -32,6 +33,7 @@ import sys
 import os
 import re
 import glob
+import hashlib
 import duckdb
 import pandas as pd
 from pathlib import Path
@@ -114,6 +116,77 @@ def get_all_input_files(input_dir):
     result.extend(files_without_dates)
 
     return result
+
+
+def compute_file_hash(filepath):
+    """SHA-256 hash of file contents for change detection."""
+    h = hashlib.sha256()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(8192), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def ensure_manifest_table(con):
+    """Create processed_files manifest table if it doesn't exist."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS processed_files (
+            filename     TEXT PRIMARY KEY,
+            file_hash    TEXT,
+            row_count    INTEGER,
+            processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            date_suffix  DATE
+        )
+    """)
+
+
+def get_unprocessed_files(con, input_dir):
+    """
+    Return list of (filepath, hash, reason) for files that are new or changed.
+    Compares SHA-256 hashes against the processed_files manifest in DuckDB.
+    """
+    ensure_manifest_table(con)
+    all_files = get_all_input_files(input_dir)
+
+    to_process = []
+    skipped = []
+
+    for filepath in all_files:
+        file_hash = compute_file_hash(filepath)
+        filename = filepath.name
+
+        existing = con.execute(
+            "SELECT file_hash FROM processed_files WHERE filename = ?",
+            [filename]
+        ).fetchone()
+
+        if existing is None:
+            to_process.append((filepath, file_hash, 'new'))
+        elif existing[0] != file_hash:
+            to_process.append((filepath, file_hash, 'changed'))
+        else:
+            skipped.append(filename)
+
+    if skipped:
+        log(f"  Skipping {len(skipped)} already-processed file(s): {', '.join(skipped)}")
+    if to_process:
+        log(f"  Found {len(to_process)} file(s) to process")
+
+    return to_process
+
+
+def record_processed_file(con, filepath, file_hash, row_count):
+    """Record a successfully processed file in the manifest."""
+    filename = filepath.name
+    date_suffix = extract_date_from_filename(filepath)
+    # Use INSERT OR REPLACE to update existing entries (e.g. changed files)
+    con.execute("""
+        DELETE FROM processed_files WHERE filename = ?
+    """, [filename])
+    con.execute("""
+        INSERT INTO processed_files (filename, file_hash, row_count, processed_at, date_suffix)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)
+    """, [filename, file_hash, row_count, date_suffix])
 
 
 def load_file_to_temp_table(con, input_path, temp_table='temp_import'):
@@ -683,10 +756,25 @@ def print_summary(con, output_dir=None):
     log("  PROCESSING SUMMARY")
     log("=" * 64)
 
+    # --- Processed files manifest ---
+    tables = con.execute("SHOW TABLES").df()['name'].tolist()
+    if 'processed_files' in tables:
+        manifest = con.execute("""
+            SELECT filename, row_count, processed_at, date_suffix
+            FROM processed_files
+            ORDER BY date_suffix, filename
+        """).df()
+        if len(manifest) > 0:
+            log("\n  PROCESSED FILES")
+            log("  " + "-" * 60)
+            for _, row in manifest.iterrows():
+                ts = str(row['processed_at'])[:19] if row['processed_at'] else '?'
+                rows = f"{int(row['row_count']):,}" if row['row_count'] else '?'
+                log(f"    {row['filename']:<45s} {rows:>8s} rows  (at {ts})")
+
     # --- DuckDB tables ---
     log("\n  DATABASE TABLES")
     log("  " + "-" * 60)
-    tables = con.execute("SHOW TABLES").df()['name'].tolist()
     for table in sorted(tables):
         if table.startswith('temp'):
             continue
@@ -948,14 +1036,40 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log("Place your KQL export files (xlsx/csv) in the input/ folder")
             sys.exit(1)
         log(f"Full refresh: processing {len(files_to_process)} files")
+
+        # Connect to DuckDB (fresh DB after deletion)
+        con = duckdb.connect(str(db_path))
+        ensure_manifest_table(con)
+
+        for input_path in files_to_process:
+            log(f"\nProcessing: {input_path.name}")
+            file_hash = compute_file_hash(input_path)
+            row_count = load_file_to_temp_table(con, input_path)
+            log(f"  Loaded {row_count:,} rows")
+            upsert_data(con)
+            record_processed_file(con, input_path, file_hash, row_count)
+
     elif input_file:
-        files_to_process = [Path(input_file)]
-        if not files_to_process[0].exists():
+        # Force-process a specific file (bypass delta check)
+        input_path = Path(input_file)
+        if not input_path.exists():
             log(f"ERROR: File not found: {input_file}")
             sys.exit(1)
+
+        con = duckdb.connect(str(db_path))
+        ensure_manifest_table(con)
+
+        log(f"\nForce-processing: {input_path.name}")
+        file_hash = compute_file_hash(input_path)
+        row_count = load_file_to_temp_table(con, input_path)
+        log(f"  Loaded {row_count:,} rows")
+        upsert_data(con)
+        record_processed_file(con, input_path, file_hash, row_count)
+
     else:
-        latest_file = find_latest_input_file(input_dir)
-        if not latest_file:
+        # Default: delta mode — only process new or changed files
+        all_files = get_all_input_files(input_dir)
+        if not all_files:
             log(f"ERROR: No input files found in {input_dir}")
             log("Place your KQL export files (xlsx/csv) in the input/ folder")
             log("Supported formats: .xlsx, .xls, .csv")
@@ -964,20 +1078,22 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log("  campaign_export_2026_02_25.xlsx")
             log("  campaign_export_2026_02_25.csv")
             sys.exit(1)
-        files_to_process = [latest_file]
-        log(f"Auto-detected latest file: {latest_file.name}")
 
-    # Connect to DuckDB
-    con = duckdb.connect(str(db_path))
+        con = duckdb.connect(str(db_path))
+        unprocessed = get_unprocessed_files(con, input_dir)
 
-    # Process each file
-    for input_path in files_to_process:
-        log(f"\nProcessing: {input_path.name}")
+        if not unprocessed:
+            log("All files already processed. Nothing new to do.")
+            log("Use --full-refresh to reprocess everything.")
+            con.close()
+            return
 
-        row_count = load_file_to_temp_table(con, input_path)
-        log(f"  Loaded {row_count:,} rows")
-
-        upsert_data(con)
+        for input_path, file_hash, reason in unprocessed:
+            log(f"\nProcessing ({reason}): {input_path.name}")
+            row_count = load_file_to_temp_table(con, input_path)
+            log(f"  Loaded {row_count:,} rows")
+            upsert_data(con)
+            record_processed_file(con, input_path, file_hash, row_count)
 
     # Load HR history for GPN-based join
     has_hr_history = load_hr_history(con, hr_parquet_path)
@@ -1009,6 +1125,6 @@ if __name__ == "__main__":
 
     if len(sys.argv) == 1:
         print(__doc__)
-        print("\nNo arguments provided - auto-detecting latest file in data/\n")
+        print("\nNo arguments provided - processing new/changed files (delta mode)\n")
 
     process_campaignwe(input_file=input_file, full_refresh=full_refresh)

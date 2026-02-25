@@ -535,7 +535,12 @@
         function getFilterWhere() {
             const clauses = [];
             for (const f of Object.values(activeFilters)) {
-                clauses.push(`${f.column} = '${String(f.value).replace(/'/g, "''")}'`);
+                const v = String(f.value);
+                if (v === '(null)' || v === '(blank)') {
+                    clauses.push(`${f.column} IS NULL`);
+                } else {
+                    clauses.push(`${f.column} = '${v.replace(/'/g, "''")}'`);
+                }
             }
             return clauses.length ? ' AND ' + clauses.join(' AND ') : '';
         }
@@ -876,13 +881,19 @@
             const values = data.map(d => Number(d.cnt));
             const pcts = pctArray(values);
             destroyChart('actions');
+            const actionLabels = data.map(d => d.action);
             charts.actions = new Chart(document.getElementById('chartActions').getContext('2d'), {
                 type: 'doughnut',
-                data: { labels: data.map(d => d.action), datasets: [{ data: values, backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
+                data: { labels: actionLabels, datasets: [{ data: values, backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
                 options: { responsive: true, maintainAspectRatio: false,
                     plugins: {
                         legend: { position: 'right', labels: doughnutLegendLabels(values, pcts) },
                         tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } }
+                    },
+                    onClick: (evt, elems) => {
+                        if (elems.length) {
+                            toggleFilter('Action Type', actionLabels[elems[0].index], 'action_type');
+                        }
                     }
                 }
             });
@@ -896,13 +907,20 @@
             const values = data.map(d => Number(d.cnt));
             const pcts = pctArray(values);
             destroyChart('linkTypes');
+            const ltLabels = data.map(d => d.lt);
             charts.linkTypes = new Chart(document.getElementById('chartLinkTypes').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => d.lt), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                data: { labels: ltLabels, datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     layout: { padding: { right: 80 } },
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
-                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } },
+                    onClick: (evt, elems) => {
+                        if (elems.length) {
+                            toggleFilter('Link Type', ltLabels[elems[0].index], 'CP_Link_Type');
+                        }
+                    }
+                },
                 plugins: [barLabelPlugin(values, pcts, { horizontal: true })]
             });
         }
