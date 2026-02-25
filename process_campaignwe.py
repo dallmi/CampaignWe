@@ -354,7 +354,11 @@ def add_calculated_columns(con, has_hr_history=False):
     # GPN field (for HR join) - top-level Email/GPN come from App Insights export,
     # CP_GPN/CP_Email come from CustomProps flattening
     gpn_candidates = [c for c in ['CP_GPN', 'CP_gpn', 'GPN', 'gpn'] if c in col_names]
-    gpn_expr = f"CAST(COALESCE({', '.join(gpn_candidates)}) AS VARCHAR)" if gpn_candidates else 'NULL'
+    # Cast to VARCHAR and strip trailing .0 from Excel float conversion (e.g. "12345678.0" → "12345678")
+    if gpn_candidates:
+        gpn_expr = f"REGEXP_REPLACE(CAST(COALESCE({', '.join(gpn_candidates)}) AS VARCHAR), '\\.0$', '')"
+    else:
+        gpn_expr = 'NULL'
 
     # Email field - top-level Email column exists in this dataset
     email_candidates = [c for c in ['Email', 'email', 'CP_Email', 'CP_email'] if c in col_names]
@@ -390,10 +394,6 @@ def add_calculated_columns(con, has_hr_history=False):
         hr_select_parts = [f'h.{src} as {alias}' for src, alias in available_hr_fields.items()]
         hr_select_sql = ', '.join(hr_select_parts) if hr_select_parts else 'NULL as hr_placeholder'
 
-        # Normalize GPN: strip leading zeros on both sides for comparison
-        gpn_norm = f"LTRIM({gpn_expr}, '0')"
-        hr_gpn_norm = "LTRIM(CAST(h.gpn AS VARCHAR), '0')"
-
         # Diagnostic: show sample GPNs from both sides
         try:
             event_gpn_sample = con.execute(f"""
@@ -414,7 +414,7 @@ def add_calculated_columns(con, has_hr_history=False):
             LEFT JOIN LATERAL (
                 SELECT {hr_select_sql}
                 FROM hr_history h
-                WHERE {hr_gpn_norm} = {gpn_norm}
+                WHERE CAST(h.gpn AS VARCHAR) = {gpn_expr}
                   AND (h.snapshot_year * 100 + h.snapshot_month) <= (YEAR(r.timestamp) * 100 + MONTH(r.timestamp))
                 ORDER BY h.snapshot_year DESC, h.snapshot_month DESC
                 LIMIT 1
@@ -426,7 +426,7 @@ def add_calculated_columns(con, has_hr_history=False):
             LEFT JOIN LATERAL (
                 SELECT {hr_select_sql}
                 FROM hr_history h
-                WHERE {hr_gpn_norm} = {gpn_norm}
+                WHERE CAST(h.gpn AS VARCHAR) = {gpn_expr}
                   AND (h.snapshot_year * 100 + h.snapshot_month) > (YEAR(r.timestamp) * 100 + MONTH(r.timestamp))
                 ORDER BY h.snapshot_year ASC, h.snapshot_month ASC
                 LIMIT 1
