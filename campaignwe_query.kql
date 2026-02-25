@@ -28,7 +28,7 @@ let CustomPropsPrefix = "CP_";
 let ClickData = customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
-    | where PageURL endswith 'gwm-prompt-library.aspx'
+    | where PageURL contains 'gwm-prompt-library.aspx'
     | extend cd = todynamic(customDimensions)
     | serialize
     | extend rowId = row_number()
@@ -61,7 +61,7 @@ ClickData
 // ============================================================================
 
 // --- QUERY A: Key discovery - find all unique CustomProps keys ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL endswith 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend cpKeys = bag_keys(CP) | mv-expand cpKey = cpKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(CP[cpKey])) by Key = cpKey | order by KeyCount desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend cpKeys = bag_keys(CP) | mv-expand cpKey = cpKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(CP[cpKey])) by Key = cpKey | order by KeyCount desc
 
 // --- QUERY B: Simplified version (no CP_ prefix) ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL endswith 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name, PageURL, Email | order by timestamp desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'gwm-prompt-library.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name, PageURL, Email | order by timestamp desc
