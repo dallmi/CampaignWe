@@ -435,14 +435,14 @@ def add_calculated_columns(con, has_hr_history=False):
         story_sql = f"""
             -- Story parsing from {link_label_col}
             -- Only extract story_id from "story of NNN" pattern (not pagination numbers etc.)
-            NULLIF(regexp_extract(r."{link_label_col}", 'story of (\d+)', 1), '') as story_id,
+            NULLIF(regexp_extract(r."{link_label_col}", 'story of (\\d+)', 1), '') as story_id,
             CASE
                 WHEN r."{link_label_col}" ILIKE 'Read story%' OR r."{link_label_col}" ILIKE '%Show More%' THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE 'hide story%' OR r."{link_label_col}" ILIKE '%Show Less%' THEN 'Hide'
                 WHEN r."{link_label_col}" ILIKE 'View Prompt%' THEN 'View Prompt'
                 WHEN r."{link_label_col}" ILIKE '%like%' THEN 'Like'
                 WHEN r."{link_label_col}" ILIKE '%share%' THEN 'Share'
-                WHEN regexp_full_match(TRIM(r."{link_label_col}"), '\d+') THEN 'Pagination'
+                WHEN regexp_full_match(TRIM(r."{link_label_col}"), '\\d+') THEN 'Pagination'
                 WHEN r."{link_label_col}" IS NULL OR TRIM(r."{link_label_col}") = '' THEN NULL
                 ELSE 'Other'
             END as action_type,"""
