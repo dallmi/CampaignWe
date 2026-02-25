@@ -18,8 +18,8 @@ let TimeRange = 30d;
 customEvents
 | where timestamp >= ago(TimeRange)
 | where name == 'click_event'
-| where PageURL contains 'gwm-prompt-library.aspx'
 | extend cd = todynamic(customDimensions)
+| where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // --- CustomDimensions keys (Level 1) ---
 | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
 | extend CustomPropsRaw = tostring(cd.CustomProps)
@@ -42,8 +42,8 @@ customEvents
     customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
-    | where PageURL contains 'gwm-prompt-library.aspx'
     | extend cd = todynamic(customDimensions)
+    | where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -72,7 +72,8 @@ customEvents
 // customEvents
 // | where timestamp >= ago(30d)
 // | where name == 'click_event'
-// | where PageURL contains 'gwm-prompt-library.aspx'
+// | extend cd = todynamic(customDimensions)
+| where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // | summarize
 //     TotalEvents = count(),
 //     UniqueUsers = dcount(user_Id),
@@ -89,5 +90,6 @@ customEvents
 // customEvents
 // | where timestamp >= ago(7d)
 // | where name == 'click_event'
-// | where PageURL contains 'gwm-prompt-library.aspx'
+// | extend cd = todynamic(customDimensions)
+| where tostring(cd.PageURL) contains 'gwm-prompt-library.aspx'
 // | take 10
