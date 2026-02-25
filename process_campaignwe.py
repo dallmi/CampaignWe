@@ -354,9 +354,10 @@ def add_calculated_columns(con, has_hr_history=False):
     # GPN field (for HR join) - top-level Email/GPN come from App Insights export,
     # CP_GPN/CP_Email come from CustomProps flattening
     gpn_candidates = [c for c in ['CP_GPN', 'CP_gpn', 'GPN', 'gpn'] if c in col_names]
-    # Cast to VARCHAR and strip trailing .0 from Excel float conversion (e.g. "12345678.0" → "12345678")
+    # Cast to VARCHAR, strip trailing .0 from Excel float conversion, then zero-pad to 8 digits
+    # e.g. "01234567.0" → "1234567.0" → "1234567" → "01234567"
     if gpn_candidates:
-        gpn_expr = f"REGEXP_REPLACE(CAST(COALESCE({', '.join(gpn_candidates)}) AS VARCHAR), '\\.0$', '')"
+        gpn_expr = f"LPAD(REGEXP_REPLACE(CAST(COALESCE({', '.join(gpn_candidates)}) AS VARCHAR), '\\.0$', ''), 8, '0')"
     else:
         gpn_expr = 'NULL'
 
@@ -745,6 +746,21 @@ def print_summary(con, output_dir=None):
                 log("\n    Top divisions:")
                 for _, row in divisions.iterrows():
                     log(f"      {str(row['hr_division']):<40s} {int(row['cnt']):>8,}")
+
+        # Show unmatched GPNs (have GPN but no HR data)
+        if with_gpn > with_hr:
+            unmatched = con.execute("""
+                SELECT gpn, COUNT(*) as cnt
+                FROM events
+                WHERE gpn IS NOT NULL AND hr_division IS NULL
+                GROUP BY gpn
+                ORDER BY cnt DESC
+                LIMIT 15
+            """).df()
+            if len(unmatched) > 0:
+                log(f"\n    Unmatched GPNs ({with_gpn - with_hr:,} events from {len(unmatched)} GPNs shown, may be more):")
+                for _, row in unmatched.iterrows():
+                    log(f"      {row['gpn']:<12s} ({int(row['cnt']):,} events)")
 
     # --- Field coverage ---
     log("\n  FIELD COVERAGE (non-null values)")

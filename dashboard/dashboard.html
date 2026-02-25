@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign — Engagement Dashboard</title>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <!-- SheetJS for XLSX export -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+    <!-- DuckDB WASM -->
+    <script type="module">
+        import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+        window.duckdb = duckdb;
+        window.dispatchEvent(new Event('duckdb-ready'));
+    </script>
+
+    <style>
+        :root {
+            --primary: #E60000;
+            --primary-dark: #8A000A;
+            --black: #000000;
+            --dark-gray: #404040;
+            --medium-gray: #7A7870;
+            --light-gray: #CCCABC;
+            --lighter-gray: #ECEBE4;
+            --row-alt: #F8F7F2;
+            --white: #FFFFFF;
+            --success: #6F7A1A;
+            --success-light: #F0F2E6;
+            --warning: #E4A911;
+            --warning-light: #FDF6E3;
+            --danger: #BD000C;
+            --danger-light: #FFEBE6;
+            --info: #8E8D83;
+            --info-light: #ECEBE4;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background-color: var(--lighter-gray);
+            color: var(--dark-gray);
+            line-height: 1.5;
+        }
+
+        .header {
+            background: var(--white);
+            color: var(--black);
+            padding: 0.75rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--light-gray);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 600;
+            padding-left: 0.75rem;
+            border-left: 3px solid var(--primary);
+        }
+
+        .header-controls { display: flex; gap: 1rem; align-items: center; }
+
+        .date-filter { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+        .date-filter.loading { opacity: 0.4; pointer-events: none; }
+
+        .date-presets {
+            display: flex; gap: 0; border: 1px solid var(--light-gray);
+            border-radius: 4px; overflow: hidden; margin-right: 0.5rem;
+        }
+
+        .date-preset {
+            padding: 0.35rem 0.6rem; background: var(--white); border: none;
+            border-right: 1px solid var(--light-gray); cursor: pointer;
+            font-size: 0.75rem; color: var(--medium-gray); white-space: nowrap; transition: all 0.15s;
+        }
+        .date-preset:last-child { border-right: none; }
+        .date-preset:hover { background: var(--lighter-gray); color: var(--dark-gray); }
+        .date-preset.active { background: var(--primary); color: var(--white); }
+
+        .date-filter label { font-size: 0.8rem; color: var(--medium-gray); }
+        .date-filter input { padding: 0.4rem 0.5rem; border: 1px solid var(--light-gray); border-radius: 4px; font-size: 0.8rem; }
+        .date-filter input:focus { outline: none; border-color: var(--primary); }
+
+        .status-indicator {
+            display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem;
+            padding: 0.25rem 0.5rem; border-radius: 4px; transition: opacity 0.3s;
+        }
+        .status-indicator.loading { color: var(--medium-gray); }
+        .status-indicator.success { color: var(--success); }
+        .status-indicator.error { color: var(--danger); }
+        .status-indicator .dot { width: 6px; height: 6px; border-radius: 50%; }
+        .status-indicator.loading .dot { background: var(--warning); animation: pulse 1s infinite; }
+        .status-indicator.success .dot { background: var(--success); }
+        .status-indicator.error .dot { background: var(--danger); }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        .container { max-width: 1800px; margin: 0 auto; padding: 1rem; }
+
+        .nav-tabs {
+            display: flex; gap: 0; background: var(--white);
+            border-radius: 8px 8px 0 0; border-bottom: 2px solid var(--light-gray);
+            margin-bottom: 0; overflow-x: auto;
+        }
+
+        .nav-tab {
+            padding: 0.75rem 1.25rem; background: transparent; border: none;
+            cursor: pointer; font-size: 0.85rem; font-weight: 500; color: var(--medium-gray);
+            border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; white-space: nowrap;
+        }
+        .nav-tab:hover { color: var(--dark-gray); background: var(--lighter-gray); }
+        .nav-tab.active { color: var(--black); border-bottom-color: var(--primary); }
+
+        .nav-content { display: none; background: var(--white); border-radius: 0 0 8px 8px; padding: 1rem; }
+        .nav-content.active { display: block; }
+
+        .loading-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 1rem; }
+        .spinner { width: 40px; height: 40px; border: 3px solid var(--light-gray); border-top-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { color: var(--medium-gray); font-size: 0.85rem; }
+
+        .active-filters { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+        .filter-tag {
+            display: inline-flex; align-items: center; gap: 0.25rem;
+            padding: 0.25rem 0.5rem; background: var(--info-light); color: var(--info);
+            border-radius: 4px; font-size: 0.7rem; font-weight: 500;
+        }
+        .filter-tag button { background: none; border: none; cursor: pointer; color: var(--info); font-size: 0.9rem; line-height: 1; padding: 0; margin-left: 0.25rem; }
+        .clear-filters { font-size: 0.7rem; color: var(--medium-gray); cursor: pointer; text-decoration: underline; }
+
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+        .kpi-card {
+            background: var(--white); border-radius: 6px; padding: 1rem;
+            border: 1px solid var(--light-gray); position: relative; transition: all 0.2s;
+        }
+        .kpi-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); transform: translateY(-1px); }
+        .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; border-radius: 6px 6px 0 0; }
+        .kpi-card.highlight::before { background: var(--primary); }
+        .kpi-card.success::before { background: var(--success); }
+        .kpi-card.warning::before { background: var(--warning); }
+        .kpi-card.danger::before { background: var(--danger); }
+        .kpi-card.info::before { background: var(--info); }
+        .kpi-label { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.3px; color: var(--medium-gray); margin-bottom: 0.25rem; }
+        .kpi-value { font-size: 1.5rem; font-weight: 700; color: var(--black); line-height: 1.2; }
+        .kpi-subtitle { font-size: 0.65rem; color: var(--medium-gray); margin-top: 0.25rem; }
+
+        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-bottom: 1rem; }
+        .chart-card { background: var(--white); border-radius: 6px; padding: 1rem; border: 1px solid var(--light-gray); }
+        .chart-card.full-width { grid-column: 1 / -1; }
+        .chart-title {
+            font-size: 0.9rem; font-weight: 600; color: var(--dark-gray);
+            margin-bottom: 0.75rem; padding-bottom: 0.5rem; border-bottom: 1px solid var(--light-gray);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .chart-subtitle { font-size: 0.7rem; color: var(--medium-gray); font-weight: 400; }
+        .chart-container { height: 200px; position: relative; }
+        .chart-container.tall { height: 280px; }
+        .chart-container.xtall { height: 360px; }
+
+        .table-container { overflow-x: auto; max-height: 500px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th { background: var(--lighter-gray); padding: 0.6rem 0.75rem; text-align: left; font-weight: 600; color: var(--dark-gray); border-bottom: 1px solid var(--light-gray); position: sticky; top: 0; z-index: 1; }
+        td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--light-gray); color: var(--dark-gray); }
+        tr:nth-child(even) td { background: var(--row-alt); }
+        tr:hover td { background: var(--lighter-gray); }
+        .text-right { text-align: right; }
+        .text-center { text-align: center; }
+
+        .export-toolbar { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; justify-content: flex-end; }
+        .export-btn {
+            padding: 0.4rem 0.75rem; border: 1px solid var(--light-gray); border-radius: 4px;
+            font-size: 0.8rem; cursor: pointer; background: var(--white); color: var(--dark-gray);
+            font-weight: 500; transition: background 0.2s;
+        }
+        .export-btn:hover { background: var(--lighter-gray); border-color: var(--medium-gray); }
+
+        .heatmap-table { border-collapse: collapse; font-size: 0.75rem; width: 100%; }
+        .heatmap-table th { padding: 0.4rem 0.5rem; background: var(--lighter-gray); font-size: 0.7rem; white-space: nowrap; }
+        .heatmap-table td { padding: 0.4rem 0.5rem; text-align: center; border: 1px solid var(--white); font-weight: 500; min-width: 60px; }
+        .heatmap-table td.row-header { text-align: left; font-weight: 600; background: var(--lighter-gray); min-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+
+        .error-message { background: var(--danger-light); color: var(--danger); padding: 1rem; border-radius: 6px; text-align: center; margin: 2rem; }
+
+        @media (max-width: 900px) {
+            .charts-grid { grid-template-columns: 1fr; }
+            .header { flex-direction: column; gap: 0.5rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Campaign — Engagement Dashboard</h1>
+        <div class="header-controls">
+            <div class="date-filter loading" id="dateFilterControls">
+                <div class="date-presets">
+                    <button class="date-preset" data-preset="7d" onclick="applyDatePreset('7d')">Last 7 days</button>
+                    <button class="date-preset" data-preset="30d" onclick="applyDatePreset('30d')">Last 30 days</button>
+                    <button class="date-preset" data-preset="this-month" onclick="applyDatePreset('this-month')">This month</button>
+                    <button class="date-preset" data-preset="last-month" onclick="applyDatePreset('last-month')">Last month</button>
+                    <button class="date-preset" data-preset="ytd" onclick="applyDatePreset('ytd')">This year</button>
+                    <button class="date-preset" data-preset="all" onclick="applyDatePreset('all')">All time</button>
+                </div>
+                <label>From:</label>
+                <input type="date" id="dateFrom" onchange="applyCustomDate()">
+                <label>To:</label>
+                <input type="date" id="dateTo" onchange="applyCustomDate()">
+            </div>
+            <div class="status-indicator loading" id="statusIndicator">
+                <div class="dot"></div>
+                <span id="statusText">Loading...</span>
+            </div>
+        </div>
+    </div>
+
+    <main class="container">
+        <!-- Loading -->
+        <div class="loading-screen" id="loadingState">
+            <div class="spinner"></div>
+            <div class="loading-text" id="loadingText">Initializing DuckDB...</div>
+        </div>
+
+        <!-- Dashboard -->
+        <div id="dashboardContent" style="display: none;">
+
+            <!-- Active filters -->
+            <div class="active-filters" id="activeFilters" style="display: none;"></div>
+
+            <!-- Tabs -->
+            <div class="nav-tabs">
+                <button class="nav-tab active" onclick="switchTab('tabOverview')">Overview</button>
+                <button class="nav-tab" onclick="switchTab('tabDivisions')">Divisions & Regions</button>
+                <button class="nav-tab" onclick="switchTab('tabStories')">Stories</button>
+                <button class="nav-tab" onclick="switchTab('tabQuality')">Data Quality</button>
+            </div>
+
+            <!-- TAB 1: Overview -->
+            <div class="nav-content active" id="tabOverview">
+                <div class="kpi-grid" id="kpiGrid"></div>
+                <div class="charts-grid">
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Daily Activity <span class="chart-subtitle">Events & unique users over time (CET)</span></div>
+                        <div class="chart-container tall"><canvas id="chartDailyTrends"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Events by Hour <span class="chart-subtitle">CET</span></div>
+                        <div class="chart-container"><canvas id="chartHourly"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Events by Weekday <span class="chart-subtitle">CET</span></div>
+                        <div class="chart-container"><canvas id="chartWeekday"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Action Types</div>
+                        <div class="chart-container"><canvas id="chartActions"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Link Types <span class="chart-subtitle">CP_Link_Type</span></div>
+                        <div class="chart-container"><canvas id="chartLinkTypes"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: Divisions & Regions -->
+            <div class="nav-content" id="tabDivisions">
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-title">Events by Division <span class="chart-subtitle">Top 15 — click to filter</span></div>
+                        <div class="chart-container xtall"><canvas id="chartDivEvents"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Unique Users by Division <span class="chart-subtitle">Top 15</span></div>
+                        <div class="chart-container xtall"><canvas id="chartDivUsers"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Events by Region <span class="chart-subtitle">Click to filter</span></div>
+                        <div class="chart-container tall"><canvas id="chartRegEvents"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Unique Users by Region</div>
+                        <div class="chart-container tall"><canvas id="chartRegUsers"></canvas></div>
+                    </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Daily Users — Top 5 Divisions</div>
+                        <div class="chart-container tall"><canvas id="chartDivDaily"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-card full-width" style="margin-top: 1rem;">
+                    <div class="chart-title">
+                        Engagement Depth by Division
+                        <div class="export-toolbar">
+                            <button class="export-btn" onclick="exportTable('divDepth', 'csv')">CSV</button>
+                            <button class="export-btn" onclick="exportTable('divDepth', 'xlsx')">XLSX</button>
+                        </div>
+                    </div>
+                    <div class="table-container" id="divDepthTable"></div>
+                </div>
+            </div>
+
+            <!-- TAB 3: Stories -->
+            <div class="nav-content" id="tabStories">
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-title">Top Stories by Reads</div>
+                        <div class="chart-container xtall"><canvas id="chartStoryReads"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">Top Stories by Unique Readers</div>
+                        <div class="chart-container xtall"><canvas id="chartStoryReaders"></canvas></div>
+                    </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Engagement Funnel — Top 10 Stories</div>
+                        <div class="chart-container tall"><canvas id="chartFunnel"></canvas></div>
+                    </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">
+                            Reads: Division × Story
+                            <div class="export-toolbar">
+                                <button class="export-btn" onclick="exportTable('divStoryHeatmap', 'csv')">CSV</button>
+                                <button class="export-btn" onclick="exportTable('divStoryHeatmap', 'xlsx')">XLSX</button>
+                            </div>
+                        </div>
+                        <div class="table-container" id="divStoryHeatmap"></div>
+                    </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">
+                            Reads: Region × Story
+                            <div class="export-toolbar">
+                                <button class="export-btn" onclick="exportTable('regStoryHeatmap', 'csv')">CSV</button>
+                                <button class="export-btn" onclick="exportTable('regStoryHeatmap', 'xlsx')">XLSX</button>
+                            </div>
+                        </div>
+                        <div class="table-container" id="regStoryHeatmap"></div>
+                    </div>
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Daily Reads — Top 5 Stories</div>
+                        <div class="chart-container tall"><canvas id="chartStoryDaily"></canvas></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: Data Quality -->
+            <div class="nav-content" id="tabQuality">
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="chart-title">GPN → HR Mapping Coverage</div>
+                        <div class="chart-container"><canvas id="chartGpnCoverage"></canvas></div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title">GPN Length Distribution</div>
+                        <div class="chart-container"><canvas id="chartGpnLength"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-card full-width" style="margin-top: 1rem;">
+                    <div class="chart-title">
+                        Unmatched GPNs
+                        <div class="export-toolbar">
+                            <button class="export-btn" onclick="exportTable('unmatchedGpns', 'csv')">CSV</button>
+                            <button class="export-btn" onclick="exportTable('unmatchedGpns', 'xlsx')">XLSX</button>
+                        </div>
+                    </div>
+                    <div class="table-container" id="unmatchedGpnTable"></div>
+                </div>
+                <div class="chart-card full-width" style="margin-top: 1rem;">
+                    <div class="chart-title">Field Coverage</div>
+                    <div class="table-container" id="fieldCoverageTable"></div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // =====================================================================
+        // GLOBAL STATE
+        // =====================================================================
+        let db = null, conn = null;
+        let dateFilter = { from: null, to: null };
+        let activeFilters = {};
+        let charts = {};
+        let tableData = {};  // stored for export
+        let renderInProgress = false;
+
+        // =====================================================================
+        // COLORS
+        // =====================================================================
+        const COLORS = {
+            primary: '#E60000', primaryDark: '#8A000A',
+            success: '#6F7A1A', warning: '#E4A911', danger: '#BD000C',
+            info: '#8E8D83', gray: '#7A7870', lightGray: '#CCCABC', dark: '#404040',
+        };
+
+        const CHART_PALETTE = [
+            '#AF8626','#00759E','#879420','#4B2D58','#9F8865',
+            '#2E476B','#469A6C','#AD3E4A','#8489BD','#0C7EC6',
+            '#654D16','#804C95','#45999C','#4972AC','#CC707A',
+            '#295B40','#545A9C','#785E4A','#07476F','#620004'
+        ];
+
+        const HEATMAP_STOPS = ['#FFFFFF','#F5F0E1','#E4A911','#E60000','#8A000A'];
+
+        // =====================================================================
+        // INIT
+        // =====================================================================
+        async function init() {
+            try {
+                updateStatus('loading', 'Waiting for DuckDB...');
+
+                if (!window.duckdb) {
+                    await Promise.race([
+                        new Promise(r => window.addEventListener('duckdb-ready', r, { once: true })),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB failed to load after 30s.')), 30000))
+                    ]);
+                }
+
+                setLoadingText('Initializing DuckDB...');
+                const m = window.duckdb;
+                const bundles = m.getJsDelivrBundles();
+                const bundle = await m.selectBundle(bundles);
+                const wurl = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
+                const worker = new Worker(wurl);
+                const logger = new m.ConsoleLogger();
+                db = new m.AsyncDuckDB(logger, worker);
+                await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+                URL.revokeObjectURL(wurl);
+                conn = await db.connect();
+
+                setLoadingText('Loading data files...');
+                await loadParquetFiles();
+                await setInitialDateRange();
+
+                document.getElementById('loadingState').style.display = 'none';
+                document.getElementById('dashboardContent').style.display = 'block';
+                document.getElementById('dateFilterControls').classList.remove('loading');
+
+                await renderDashboard();
+                updateStatus('success', 'Ready');
+            } catch (err) {
+                console.error('Init error:', err);
+                document.getElementById('loadingState').innerHTML = `<div class="error-message">Failed to initialize: ${err.message}</div>`;
+                updateStatus('error', 'Error');
+            }
+        }
+
+        async function loadParquetFiles() {
+            const base = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+            const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+
+            async function load(view, file, msg) {
+                for (const p of paths) {
+                    try { await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${p}${file}')`); setLoadingText(msg); return; }
+                    catch(e) { /* try next */ }
+                }
+                throw new Error(`Could not find ${file}`);
+            }
+
+            await load('events', 'events_raw.parquet', 'Loaded events...');
+            await load('daily', 'events_daily.parquet', 'Loaded daily data...');
+            // events_story is optional — used for pre-aggregated story data
+            try { await load('story_agg', 'events_story.parquet', 'Loaded story data...'); } catch(e) { /* optional */ }
+        }
+
+        // =====================================================================
+        // DATE RANGE
+        // =====================================================================
+        async function setInitialDateRange() {
+            const r = await conn.query(`SELECT MIN(date) as mn, MAX(date) as mx FROM daily`);
+            const row = r.toArray()[0];
+            if (row && row.mn != null) {
+                dateFilter.from = new Date(row.mn);
+                dateFilter.to = new Date(row.mx);
+            } else {
+                const today = new Date();
+                dateFilter.to = today;
+                dateFilter.from = new Date(today); dateFilter.from.setDate(today.getDate() - 30);
+            }
+            document.getElementById('dateFrom').value = fmtDate(dateFilter.from);
+            document.getElementById('dateTo').value = fmtDate(dateFilter.to);
+        }
+
+        function fmtDate(d) { return d.toISOString().split('T')[0]; }
+
+        function getDateWhere(col = 'session_date') {
+            if (!dateFilter.from || !dateFilter.to) return '1=1';
+            return `${col} >= '${fmtDate(dateFilter.from)}' AND ${col} <= '${fmtDate(dateFilter.to)}'`;
+        }
+
+        async function applyDatePreset(preset) {
+            const today = new Date(); let from, to;
+            switch (preset) {
+                case '7d': to = today; from = new Date(today); from.setDate(from.getDate() - 6); break;
+                case '30d': to = today; from = new Date(today); from.setDate(from.getDate() - 29); break;
+                case 'this-month': from = new Date(today.getFullYear(), today.getMonth(), 1); to = today; break;
+                case 'last-month': from = new Date(today.getFullYear(), today.getMonth()-1, 1); to = new Date(today.getFullYear(), today.getMonth(), 0); break;
+                case 'ytd': from = new Date(today.getFullYear(), 0, 1); to = today; break;
+                case 'all': { const r = await conn.query('SELECT MIN(date) as mn, MAX(date) as mx FROM daily'); const row = r.toArray()[0]; from = new Date(row.mn); to = new Date(row.mx); break; }
+            }
+            dateFilter.from = from; dateFilter.to = to;
+            document.getElementById('dateFrom').value = fmtDate(from);
+            document.getElementById('dateTo').value = fmtDate(to);
+            document.querySelectorAll('.date-preset').forEach(b => b.classList.toggle('active', b.dataset.preset === preset));
+            await renderDashboard();
+        }
+
+        async function applyCustomDate() {
+            const f = document.getElementById('dateFrom').value;
+            const t = document.getElementById('dateTo').value;
+            if (f && t) { dateFilter.from = new Date(f); dateFilter.to = new Date(t); document.querySelectorAll('.date-preset').forEach(b => b.classList.remove('active')); await renderDashboard(); }
+        }
+
+        // =====================================================================
+        // FILTERS
+        // =====================================================================
+        function getFilterWhere() {
+            const clauses = [];
+            for (const f of Object.values(activeFilters)) {
+                clauses.push(`${f.column} = '${String(f.value).replace(/'/g, "''")}'`);
+            }
+            return clauses.length ? ' AND ' + clauses.join(' AND ') : '';
+        }
+
+        function toggleFilter(label, value, column) {
+            if (activeFilters[label] && activeFilters[label].value === value) { delete activeFilters[label]; }
+            else { activeFilters[label] = { value, column }; }
+            updateFiltersDisplay();
+            renderDashboard();
+        }
+
+        function removeFilter(key) { delete activeFilters[key]; updateFiltersDisplay(); renderDashboard(); }
+        function clearAllFilters() { activeFilters = {}; updateFiltersDisplay(); renderDashboard(); }
+
+        function updateFiltersDisplay() {
+            const el = document.getElementById('activeFilters');
+            const entries = Object.entries(activeFilters);
+            if (entries.length === 0) { el.style.display = 'none'; return; }
+            el.style.display = 'flex';
+            el.innerHTML = entries.map(([k, f]) =>
+                `<div class="filter-tag"><span>${k}: ${f.value}</span><button onclick="removeFilter('${k}')">&times;</button></div>`
+            ).join('') + `<span class="clear-filters" onclick="clearAllFilters()">Clear all</span>`;
+        }
+
+        // =====================================================================
+        // TAB SWITCHING
+        // =====================================================================
+        function switchTab(id) {
+            document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.nav-content').forEach(c => c.classList.remove('active'));
+            document.querySelector(`[onclick="switchTab('${id}')"]`)?.classList.add('active');
+            document.getElementById(id)?.classList.add('active');
+        }
+
+        // =====================================================================
+        // HELPERS
+        // =====================================================================
+        function setLoadingText(t) { document.getElementById('loadingText').textContent = t; }
+        function updateStatus(type, msg) {
+            const el = document.getElementById('statusIndicator');
+            el.className = 'status-indicator ' + type;
+            document.getElementById('statusText').textContent = msg;
+        }
+
+        function fmtNum(n) {
+            if (n == null) return '-';
+            n = Number(n);
+            if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+            if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+            return n.toLocaleString();
+        }
+
+        function destroyChart(name) { if (charts[name]) { charts[name].destroy(); delete charts[name]; } }
+
+        function heatColor(val, max) {
+            if (!max || val === 0) return '#FFFFFF';
+            const t = Math.min(val / max, 1);
+            // white → pastel → amber → red → dark red
+            const stops = [[255,255,255],[245,240,225],[228,169,17],[230,0,0],[138,0,10]];
+            const seg = t * (stops.length - 1);
+            const i = Math.min(Math.floor(seg), stops.length - 2);
+            const f = seg - i;
+            const r = Math.round(stops[i][0] + f * (stops[i+1][0] - stops[i][0]));
+            const g = Math.round(stops[i][1] + f * (stops[i+1][1] - stops[i][1]));
+            const b = Math.round(stops[i][2] + f * (stops[i+1][2] - stops[i][2]));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function textColorForBg(val, max) {
+            return (max && val > max * 0.5) ? '#FFFFFF' : '#404040';
+        }
+
+        async function q(sql) { return (await conn.query(sql)).toArray(); }
+
+        // =====================================================================
+        // EXPORT
+        // =====================================================================
+        function exportTable(key, format) {
+            const data = tableData[key];
+            if (!data || !data.headers || !data.rows || data.rows.length === 0) return;
+            const prefix = `campaignwe_${key}_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}`;
+            if (format === 'csv') {
+                const enc = v => { const s = String(v == null ? '' : v); return (s.includes(',') || s.includes('"') || s.includes('\n')) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+                const csv = '\uFEFF' + [data.headers.map(enc).join(','), ...data.rows.map(r => r.map(enc).join(','))].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = prefix + '.csv'; a.click();
+                URL.revokeObjectURL(url);
+            } else if (format === 'xlsx') {
+                if (typeof XLSX === 'undefined') { alert('XLSX library not loaded.'); return; }
+                const wsData = [data.headers, ...data.rows];
+                const ws = XLSX.utils.aoa_to_sheet(wsData);
+                ws['!cols'] = data.headers.map((h, i) => {
+                    const maxLen = Math.max(h.length, ...data.rows.slice(0, 100).map(r => String(r[i] || '').length));
+                    return { wch: Math.min(maxLen + 2, 40) };
+                });
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, key);
+                XLSX.writeFile(wb, prefix + '.xlsx');
+            }
+        }
+
+        // =====================================================================
+        // RENDER ORCHESTRATION
+        // =====================================================================
+        async function renderDashboard() {
+            if (renderInProgress) return;
+            renderInProgress = true;
+            updateStatus('loading', 'Refreshing...');
+            try {
+                const tasks = [
+                    renderKPIs, renderDailyTrends, renderHourly, renderWeekday,
+                    renderActions, renderLinkTypes,
+                    renderDivEvents, renderDivUsers, renderRegEvents, renderRegUsers,
+                    renderDivDaily, renderDivDepthTable,
+                    renderStoryReads, renderStoryReaders, renderFunnel,
+                    renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
+                    renderGpnCoverage, renderGpnLength, renderUnmatchedGpns, renderFieldCoverage
+                ];
+                const results = await Promise.allSettled(tasks.map(fn => fn()));
+                const fails = results.filter(r => r.status === 'rejected');
+                if (fails.length) { console.error('Render failures:', fails.map(f => f.reason)); updateStatus('warning', `${fails.length} section(s) failed`); }
+                else { updateStatus('success', 'Ready'); }
+            } finally { renderInProgress = false; }
+        }
+
+        // =====================================================================
+        // TAB 1: OVERVIEW
+        // =====================================================================
+        async function renderKPIs() {
+            const data = await q(`
+                SELECT COUNT(*) as events, COUNT(DISTINCT gpn) as users, COUNT(DISTINCT session_key) as sessions,
+                       COUNT(DISTINCT story_id) as stories,
+                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
+                       ROUND(100.0 * SUM(CASE WHEN hr_division IS NOT NULL THEN 1 ELSE 0 END) / COUNT(*), 1) as hr_pct
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}
+            `);
+            const d = data[0] || {};
+            document.getElementById('kpiGrid').innerHTML = [
+                kpiCard('TOTAL EVENTS', fmtNum(d.events), 'highlight'),
+                kpiCard('UNIQUE USERS', fmtNum(d.users), 'info', 'Distinct GPNs'),
+                kpiCard('SESSIONS', fmtNum(d.sessions), 'info'),
+                kpiCard('STORIES VIEWED', fmtNum(d.stories), 'success'),
+                kpiCard('EVENTS / USER', d.events_per_user ?? '-', 'warning'),
+                kpiCard('HR COVERAGE', (d.hr_pct ?? 0) + '%', 'info'),
+            ].join('');
+        }
+
+        function kpiCard(label, value, type, subtitle) {
+            return `<div class="kpi-card ${type}"><div class="kpi-label">${label}</div><div class="kpi-value">${value}</div>${subtitle ? `<div class="kpi-subtitle">${subtitle}</div>` : ''}</div>`;
+        }
+
+        async function renderDailyTrends() {
+            const data = await q(`
+                SELECT date, total_events as events, unique_users as users FROM daily
+                WHERE ${getDateWhere('date')} ORDER BY date
+            `);
+            destroyChart('dailyTrends');
+            const ctx = document.getElementById('chartDailyTrends').getContext('2d');
+            charts.dailyTrends = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => new Date(d.date)),
+                    datasets: [
+                        { label: 'Events', data: data.map(d => Number(d.events)), borderColor: COLORS.primary, backgroundColor: 'rgba(230,0,0,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
+                        { label: 'Unique Users', data: data.map(d => Number(d.users)), borderColor: CHART_PALETTE[1], backgroundColor: 'rgba(0,117,158,0.08)', fill: true, tension: 0.3, yAxisID: 'y1' }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { position: 'left', title: { display: true, text: 'Events' } }, y1: { position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Users' } } }
+                }
+            });
+        }
+
+        async function renderHourly() {
+            const data = await q(`
+                SELECT event_hour as hour, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY 1
+            `);
+            destroyChart('hourly');
+            charts.hourly = new Chart(document.getElementById('chartHourly').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.hour), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: COLORS.primary, borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderWeekday() {
+            const data = await q(`
+                SELECT event_weekday as day, event_weekday_num as num, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1, 2 ORDER BY 2
+            `);
+            destroyChart('weekday');
+            charts.weekday = new Chart(document.getElementById('chartWeekday').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.day), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => Number(d.num) <= 5 ? COLORS.primary : COLORS.info), borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderActions() {
+            const data = await q(`
+                SELECT COALESCE(action_type, '(null)') as action, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
+            `);
+            destroyChart('actions');
+            charts.actions = new Chart(document.getElementById('chartActions').getContext('2d'), {
+                type: 'doughnut',
+                data: { labels: data.map(d => d.action), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]) }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } } } }
+            });
+        }
+
+        async function renderLinkTypes() {
+            const data = await q(`
+                SELECT COALESCE(CP_Link_Type, '(blank)') as lt, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
+            `);
+            destroyChart('linkTypes');
+            charts.linkTypes = new Chart(document.getElementById('chartLinkTypes').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.lt), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: CHART_PALETTE[1], borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+            });
+        }
+
+        // =====================================================================
+        // TAB 2: DIVISIONS & REGIONS
+        // =====================================================================
+        async function renderDivEvents() {
+            const data = await q(`
+                SELECT COALESCE(hr_division, '(unknown)') as div, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC LIMIT 15
+            `);
+            destroyChart('divEvents');
+            charts.divEvents = new Chart(document.getElementById('chartDivEvents').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : COLORS.primary), borderRadius: 2 }] },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true } },
+                    onClick: (evt, elems) => { if (elems.length) { const lbl = data[elems[0].index].div; if (lbl !== '(unknown)') toggleFilter('Division', lbl, 'hr_division'); } }
+                }
+            });
+        }
+
+        async function renderDivUsers() {
+            const data = await q(`
+                SELECT COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT gpn) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC LIMIT 15
+            `);
+            destroyChart('divUsers');
+            charts.divUsers = new Chart(document.getElementById('chartDivUsers').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.div), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.div === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[1]), borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderRegEvents() {
+            const data = await q(`
+                SELECT COALESCE(hr_region, '(unknown)') as reg, COUNT(*) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
+            `);
+            destroyChart('regEvents');
+            charts.regEvents = new Chart(document.getElementById('chartRegEvents').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[0]), borderRadius: 2 }] },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+                    scales: { x: { beginAtZero: true } },
+                    onClick: (evt, elems) => { if (elems.length) { const lbl = data[elems[0].index].reg; if (lbl !== '(unknown)') toggleFilter('Region', lbl, 'hr_region'); } }
+                }
+            });
+        }
+
+        async function renderRegUsers() {
+            const data = await q(`
+                SELECT COALESCE(hr_region, '(unknown)') as reg, COUNT(DISTINCT gpn) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY cnt DESC
+            `);
+            destroyChart('regUsers');
+            charts.regUsers = new Chart(document.getElementById('chartRegUsers').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.reg), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: data.map(d => d.reg === '(unknown)' ? COLORS.lightGray : CHART_PALETTE[6]), borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderDivDaily() {
+            const top5 = await q(`
+                SELECT COALESCE(hr_division, '(unknown)') as div FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL
+                GROUP BY 1 ORDER BY COUNT(DISTINCT gpn) DESC LIMIT 5
+            `);
+            const divNames = top5.map(d => d.div);
+            if (divNames.length === 0) { destroyChart('divDaily'); return; }
+
+            const data = await q(`
+                SELECT session_date as date, COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT gpn) as users FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IN (${divNames.map(d => `'${d.replace(/'/g,"''")}'`).join(',')})
+                GROUP BY 1, 2 ORDER BY 1
+            `);
+
+            const dates = [...new Set(data.map(d => String(d.date).split('T')[0]))].sort();
+            const datasets = divNames.map((div, i) => {
+                const divData = data.filter(d => d.div === div);
+                const map = {}; divData.forEach(d => { map[String(d.date).split('T')[0]] = Number(d.users); });
+                return { label: div, data: dates.map(dt => map[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
+            });
+
+            destroyChart('divDaily');
+            charts.divDaily = new Chart(document.getElementById('chartDivDaily').getContext('2d'), {
+                type: 'line',
+                data: { labels: dates.map(d => new Date(d)), datasets },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Unique Users' } } } }
+            });
+        }
+
+        async function renderDivDepthTable() {
+            const data = await q(`
+                SELECT COALESCE(hr_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT gpn) as users,
+                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
+                       COUNT(DISTINCT story_id) as stories,
+                       SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads,
+                       SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) as likes,
+                       SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) as shares
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY events DESC
+            `);
+            const headers = ['Division','Events','Users','Events/User','Stories','Reads','Likes','Shares'];
+            const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes), Number(d.shares)]);
+            tableData.divDepth = { headers, rows };
+            document.getElementById('divDepthTable').innerHTML = renderHTMLTable(headers, rows, [false,true,true,true,true,true,true,true]);
+        }
+
+        // =====================================================================
+        // TAB 3: STORIES
+        // =====================================================================
+        async function renderStoryReads() {
+            const data = await q(`
+                SELECT story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
+                GROUP BY 1 ORDER BY reads DESC LIMIT 20
+            `);
+            destroyChart('storyReads');
+            charts.storyReads = new Chart(document.getElementById('chartStoryReads').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.reads)), backgroundColor: COLORS.primary, borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderStoryReaders() {
+            const data = await q(`
+                SELECT story_id, COUNT(DISTINCT gpn) as readers FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
+                GROUP BY 1 ORDER BY readers DESC LIMIT 20
+            `);
+            destroyChart('storyReaders');
+            charts.storyReaders = new Chart(document.getElementById('chartStoryReaders').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: data.map(d => Number(d.readers)), backgroundColor: CHART_PALETTE[1], borderRadius: 2 }] },
+                options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderFunnel() {
+            const data = await q(`
+                SELECT story_id,
+                       SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads,
+                       SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) as hides,
+                       SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) as likes,
+                       SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) as shares,
+                       SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) as vp
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
+                GROUP BY 1 ORDER BY reads DESC LIMIT 10
+            `);
+            destroyChart('funnel');
+            const labels = data.map(d => 'Story ' + d.story_id);
+            const metrics = [
+                { key: 'reads', label: 'Read', color: COLORS.primary },
+                { key: 'hides', label: 'Hide', color: COLORS.info },
+                { key: 'likes', label: 'Like', color: COLORS.success },
+                { key: 'shares', label: 'Share', color: CHART_PALETTE[1] },
+                { key: 'vp', label: 'View Prompt', color: CHART_PALETTE[0] }
+            ];
+            charts.funnel = new Chart(document.getElementById('chartFunnel').getContext('2d'), {
+                type: 'bar',
+                data: { labels, datasets: metrics.map(m => ({ label: m.label, data: data.map(d => Number(d[m.key])), backgroundColor: m.color, borderRadius: 2 })) },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderDivStoryHeatmap() {
+            const data = await q(`
+                WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10),
+                     top_d AS (SELECT hr_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
+                SELECT hr_division as div, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_division IN (SELECT * FROM top_d)
+                GROUP BY 1, 2
+            `);
+            const stories = [...new Set(data.map(d => d.story_id))];
+            const divs = [...new Set(data.map(d => d.div))];
+            const map = {}; data.forEach(d => { map[d.div + '|' + d.story_id] = Number(d.reads); });
+            const maxVal = Math.max(...data.map(d => Number(d.reads)), 1);
+
+            const headers = ['Division', ...stories.map(s => 'Story ' + s)];
+            const rows = divs.map(div => [div, ...stories.map(s => map[div + '|' + s] || 0)]);
+            tableData.divStoryHeatmap = { headers, rows };
+            document.getElementById('divStoryHeatmap').innerHTML = renderHeatmapTable(divs, stories.map(s => 'Story ' + s), (r, c) => map[divs[r] + '|' + stories[c]] || 0, maxVal);
+        }
+
+        async function renderRegStoryHeatmap() {
+            const data = await q(`
+                WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
+                SELECT hr_region as reg, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_region IS NOT NULL
+                GROUP BY 1, 2
+            `);
+            const stories = [...new Set(data.map(d => d.story_id))];
+            const regs = [...new Set(data.map(d => d.reg))];
+            const map = {}; data.forEach(d => { map[d.reg + '|' + d.story_id] = Number(d.reads); });
+            const maxVal = Math.max(...data.map(d => Number(d.reads)), 1);
+
+            const headers = ['Region', ...stories.map(s => 'Story ' + s)];
+            const rows = regs.map(reg => [reg, ...stories.map(s => map[reg + '|' + s] || 0)]);
+            tableData.regStoryHeatmap = { headers, rows };
+            document.getElementById('regStoryHeatmap').innerHTML = renderHeatmapTable(regs, stories.map(s => 'Story ' + s), (r, c) => map[regs[r] + '|' + stories[c]] || 0, maxVal);
+        }
+
+        async function renderStoryDaily() {
+            const top5 = await q(`
+                SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
+                GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 5
+            `);
+            const sids = top5.map(d => d.story_id);
+            if (!sids.length) { destroyChart('storyDaily'); return; }
+
+            const data = await q(`
+                SELECT session_date as date, story_id, SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) as reads
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (${sids.map(s => `'${s}'`).join(',')})
+                GROUP BY 1, 2 ORDER BY 1
+            `);
+            const dates = [...new Set(data.map(d => String(d.date).split('T')[0]))].sort();
+            const datasets = sids.map((sid, i) => {
+                const m = {}; data.filter(d => d.story_id === sid).forEach(d => { m[String(d.date).split('T')[0]] = Number(d.reads); });
+                return { label: 'Story ' + sid, data: dates.map(dt => m[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
+            });
+            destroyChart('storyDaily');
+            charts.storyDaily = new Chart(document.getElementById('chartStoryDaily').getContext('2d'), {
+                type: 'line',
+                data: { labels: dates.map(d => new Date(d)), datasets },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Read Events' } } } }
+            });
+        }
+
+        // =====================================================================
+        // TAB 4: DATA QUALITY
+        // =====================================================================
+        async function renderGpnCoverage() {
+            const data = await q(`
+                SELECT
+                    SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) as matched,
+                    SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) as unmatched,
+                    SUM(CASE WHEN gpn IS NULL THEN 1 ELSE 0 END) as no_gpn
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}
+            `);
+            const d = data[0];
+            destroyChart('gpnCoverage');
+            charts.gpnCoverage = new Chart(document.getElementById('chartGpnCoverage').getContext('2d'), {
+                type: 'bar',
+                data: { labels: ['HR Matched', 'GPN but no HR', 'No GPN'],
+                    datasets: [{ data: [Number(d.matched), Number(d.unmatched), Number(d.no_gpn)], backgroundColor: [COLORS.success, COLORS.warning, COLORS.lightGray], borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+            });
+        }
+
+        async function renderGpnLength() {
+            const data = await q(`
+                SELECT LENGTH(gpn) as len, COUNT(DISTINCT gpn) as cnt FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL GROUP BY 1 ORDER BY 1
+            `);
+            destroyChart('gpnLength');
+            charts.gpnLength = new Chart(document.getElementById('chartGpnLength').getContext('2d'), {
+                type: 'bar',
+                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: data.map(d => Number(d.cnt)), backgroundColor: CHART_PALETTE[0], borderRadius: 2 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Unique GPNs' } } } }
+            });
+        }
+
+        async function renderUnmatchedGpns() {
+            const data = await q(`
+                SELECT gpn, COUNT(*) as events, COUNT(DISTINCT session_key) as sessions,
+                       MIN(session_date) as first_seen, MAX(session_date) as last_seen,
+                       ANY_VALUE(email) as sample_email
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL AND hr_division IS NULL
+                GROUP BY gpn ORDER BY events DESC LIMIT 50
+            `);
+            const headers = ['GPN','Events','Sessions','First Seen','Last Seen','Sample Email'];
+            const rows = data.map(d => [d.gpn, Number(d.events), Number(d.sessions), String(d.first_seen).split('T')[0], String(d.last_seen).split('T')[0], d.sample_email || '']);
+            tableData.unmatchedGpns = { headers, rows };
+            document.getElementById('unmatchedGpnTable').innerHTML = rows.length ? renderHTMLTable(headers, rows, [false,true,true,false,false,false]) : '<p style="padding:1rem;color:var(--medium-gray)">No unmatched GPNs in selected range.</p>';
+        }
+
+        async function renderFieldCoverage() {
+            const fields = ['gpn','email','session_id','user_id','story_id','action_type','hr_division','hr_region','hr_country','hr_job_family','hr_management_level'];
+            // Check which fields exist
+            let existingCols;
+            try { existingCols = (await q("DESCRIBE events")).map(d => d.column_name); } catch(e) { existingCols = []; }
+            const validFields = fields.filter(f => existingCols.includes(f));
+            if (!validFields.length) { document.getElementById('fieldCoverageTable').innerHTML = '<p style="padding:1rem">No fields to check.</p>'; return; }
+
+            const data = await q(`
+                SELECT COUNT(*) as total, ${validFields.map(f => `COUNT(${f}) as "${f}"`).join(', ')} FROM events WHERE ${getDateWhere()}${getFilterWhere()}
+            `);
+            const d = data[0]; const total = Number(d.total);
+            const headers = ['Field', 'Non-null', 'Null', 'Fill Rate'];
+            const rows = validFields.map(f => {
+                const nn = Number(d[f]);
+                return [f, nn.toLocaleString(), (total - nn).toLocaleString(), total > 0 ? (100 * nn / total).toFixed(1) + '%' : '0%'];
+            });
+            document.getElementById('fieldCoverageTable').innerHTML = renderHTMLTable(headers, rows, [false, true, true, true]);
+        }
+
+        // =====================================================================
+        // TABLE RENDERING HELPERS
+        // =====================================================================
+        function renderHTMLTable(headers, rows, rightAlign) {
+            const th = headers.map((h, i) => `<th class="${rightAlign && rightAlign[i] ? 'text-right' : ''}">${h}</th>`).join('');
+            const tbody = rows.map(r => '<tr>' + r.map((v, i) => `<td class="${rightAlign && rightAlign[i] ? 'text-right' : ''}">${v != null ? (typeof v === 'number' ? v.toLocaleString() : v) : ''}</td>`).join('') + '</tr>').join('');
+            return `<table><thead><tr>${th}</tr></thead><tbody>${tbody}</tbody></table>`;
+        }
+
+        function renderHeatmapTable(rowLabels, colLabels, getValue, maxVal) {
+            const th = '<th></th>' + colLabels.map(c => `<th>${c}</th>`).join('');
+            const tbody = rowLabels.map((rl, ri) => {
+                const cells = colLabels.map((_, ci) => {
+                    const v = getValue(ri, ci);
+                    const bg = heatColor(v, maxVal);
+                    const fg = textColorForBg(v, maxVal);
+                    return `<td style="background:${bg};color:${fg}">${v > 0 ? v : ''}</td>`;
+                }).join('');
+                return `<tr><td class="row-header" title="${rl}">${rl}</td>${cells}</tr>`;
+            }).join('');
+            return `<table class="heatmap-table"><thead><tr>${th}</tr></thead><tbody>${tbody}</tbody></table>`;
+        }
+
+        // =====================================================================
+        // START
+        // =====================================================================
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
