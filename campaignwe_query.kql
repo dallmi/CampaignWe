@@ -29,8 +29,8 @@ let CustomPropsPrefix = "CP_";
 let ClickData = customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
-    | where PageURL contains 'example.aspx'
     | extend cd = todynamic(customDimensions)
+    | where tostring(cd.PageURL) contains 'example.aspx'
     | serialize
     | extend rowId = row_number()
     // --- Level 1: Separate CustomProps from top-level customDimensions ---
@@ -69,14 +69,14 @@ let ClickData = customEvents
         pack(strcat(CustomPropsPrefix, cpKey, "_", subKey, "_", subSubKey), tostring(L4Bag[subSubKey]))
       )
     // --- Reaggregate back to one row per event ---
-    | summarize take_any(timestamp), take_any(name), take_any(PageURL), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
+    | summarize take_any(timestamp), take_any(name), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
     | extend finalBag = bag_merge(mainBag, coalesce(merged, dynamic({})));
 ClickData
 | evaluate bag_unpack(finalBag)
 | project-away rowId, mainBag, merged
 | extend ['timestamp [UTC]'] = format_datetime(timestamp, 'dd/MM/yyyy HH:mm:ss.fffffff')
 | project-away timestamp
-| project-reorder ['timestamp [UTC]'], name, PageURL, client_CountryOrRegion, user_Id, session_Id
+| project-reorder ['timestamp [UTC]'], name, client_CountryOrRegion, user_Id, session_Id
 | order by ['timestamp [UTC]'] desc
 // === COPY TO HERE ===
 
@@ -86,7 +86,7 @@ ClickData
 // ============================================================================
 
 // --- QUERY A: Key discovery - find all unique CustomProps keys ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'example.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend mainKeys = bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"]))) | mv-expand mainKey = mainKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(cd[mainKey])) by Key = mainKey | order by KeyCount desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'example.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend mainKeys = bag_keys(bag_remove_keys(cd, dynamic(["CustomProps"]))) | mv-expand mainKey = mainKeys to typeof(string) | summarize KeyCount = count(), SampleValue = take_any(tostring(cd[mainKey])) by Key = mainKey | order by KeyCount desc
 
 // --- QUERY B: Simplified version (no CP_ prefix, no deep nesting) ---
-// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | where PageURL contains 'example.aspx' | extend cd = todynamic(customDimensions) | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name, PageURL | order by timestamp desc
+// customEvents | where timestamp >= ago(30d) | where name == 'click_event' | extend cd = todynamic(customDimensions) | where tostring(cd.PageURL) contains 'example.aspx' | extend CP = todynamic(tostring(cd.CustomProps)) | extend flatBag = bag_merge(bag_remove_keys(cd, dynamic(["CustomProps"])), coalesce(CP, dynamic({}))) | evaluate bag_unpack(flatBag) | project-reorder timestamp, name | order by timestamp desc

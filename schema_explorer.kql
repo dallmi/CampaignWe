@@ -27,8 +27,8 @@ let TimeRange = 30d;
 customEvents
 | where timestamp >= ago(TimeRange)
 | where name == 'click_event'
-| where PageURL contains 'example.aspx'
 | extend cd = todynamic(customDimensions)
+| where tostring(cd.PageURL) contains 'example.aspx'
 // --- Level 1: top-level customDimensions keys ---
 | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
 | extend CustomPropsRaw = tostring(cd.CustomProps)
@@ -51,8 +51,8 @@ customEvents
     customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
-    | where PageURL contains 'example.aspx'
     | extend cd = todynamic(customDimensions)
+    | where tostring(cd.PageURL) contains 'example.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -73,8 +73,8 @@ customEvents
     customEvents
     | where timestamp >= ago(TimeRange)
     | where name == 'click_event'
-    | where PageURL contains 'example.aspx'
     | extend cd = todynamic(customDimensions)
+    | where tostring(cd.PageURL) contains 'example.aspx'
     | extend CP = iff(
         isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
         todynamic(tostring(cd.CustomProps)),
@@ -109,8 +109,8 @@ customEvents
 // customEvents
 // | where timestamp >= ago(TimeRange)
 // | where name == 'click_event'
-// | where PageURL contains 'example.aspx'
 // | extend cd = todynamic(customDimensions)
+// | where tostring(cd.PageURL) contains 'example.aspx'
 // | extend CustomPropsRaw = tostring(cd.CustomProps)
 // | extend hasCP = isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{"
 // | extend CP = iff(hasCP, todynamic(CustomPropsRaw), dynamic({}))
@@ -150,8 +150,8 @@ customEvents
 // customEvents
 // | where timestamp >= ago(TimeRange)
 // | where name == 'click_event'
-// | where PageURL contains 'example.aspx'
 // | extend cd = todynamic(customDimensions)
+// | where tostring(cd.PageURL) contains 'example.aspx'
 // | extend CP = iff(
 //     isnotempty(tostring(cd.CustomProps)) and tostring(cd.CustomProps) startswith "{",
 //     todynamic(tostring(cd.CustomProps)),
