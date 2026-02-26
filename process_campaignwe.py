@@ -388,6 +388,27 @@ def upsert_data(con, temp_table='temp_import'):
     con.execute(f"DROP TABLE IF EXISTS {temp_table}")
 
 
+def load_story_titles(con, story_titles_path):
+    """
+    Load story_titles.parquet into DuckDB for story_id -> story_title lookup.
+    Returns True if loaded successfully, False otherwise.
+    """
+    if not story_titles_path.exists():
+        log(f"  INFO: Story titles file not found: {story_titles_path}")
+        log(f"        Run fetch_story_titles.py to pull titles from SharePoint.")
+        return False
+
+    con.execute("DROP TABLE IF EXISTS story_titles")
+    con.execute(f"""
+        CREATE TABLE story_titles AS
+        SELECT * FROM read_parquet('{story_titles_path}')
+    """)
+
+    row_count = con.execute("SELECT COUNT(*) FROM story_titles").fetchone()[0]
+    log(f"  Loaded story_titles: {row_count} stories")
+    return True
+
+
 def load_hr_history(con, hr_parquet_path):
     """
     Load hr_history.parquet into DuckDB for GPN-based joining.
@@ -724,6 +745,8 @@ def export_parquet_files(con, output_dir):
         hr_story_group = ', ' + ', '.join(hr_story_cols) if hr_story_cols else ''
         hr_story_select = hr_story_group
 
+        story_title_select = ", MAX(story_title) as story_title" if 'story_title' in events_cols else ''
+
         con.execute(f"""
             CREATE OR REPLACE TABLE events_story AS
                 SELECT
@@ -739,6 +762,7 @@ def export_parquet_files(con, output_dir):
                     COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares,
                     COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
                     COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
+                    {story_title_select}
                 FROM events
                 WHERE story_id IS NOT NULL AND story_id != ''
                 GROUP BY story_id, session_date {hr_story_group}
@@ -975,9 +999,12 @@ def print_summary(con, output_dir=None):
             log(f"    Other:             {int(story_stats['other_actions']):,}")
 
         # Top stories by reads
-        top_stories = con.execute("""
+        has_title = 'story_title' in events_cols
+        title_select = ", MAX(story_title) as story_title" if has_title else ""
+        top_stories = con.execute(f"""
             SELECT
-                story_id,
+                story_id
+                {title_select},
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(DISTINCT gpn) as unique_readers,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
@@ -991,9 +1018,15 @@ def print_summary(con, output_dir=None):
 
         if len(top_stories) > 0:
             log("\n    Top stories by reads:")
-            log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
-            for _, row in top_stories.iterrows():
-                log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
+            if has_title:
+                log(f"    {'Story ID':<12s} {'Title':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
+                for _, row in top_stories.iterrows():
+                    title = str(row['story_title'] or '')[:28]
+                    log(f"    {str(row['story_id']):<12s} {title:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
+            else:
+                log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
+                for _, row in top_stories.iterrows():
+                    log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
 
     log("\n" + "=" * 64)
 
@@ -1014,6 +1047,9 @@ def process_campaignwe(input_file=None, full_refresh=False):
 
     # HR history parquet from SearchAnalytics
     hr_parquet_path = script_dir.parent / 'SearchAnalytics' / 'output' / 'hr_history.parquet'
+
+    # Story titles from SharePoint
+    story_titles_path = output_dir / 'story_titles.parquet'
 
     # Create directories
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -1101,6 +1137,24 @@ def process_campaignwe(input_file=None, full_refresh=False):
     # Add calculated columns (with HR join if available)
     add_calculated_columns(con, has_hr_history=has_hr_history)
 
+    # Load story titles for story_id -> story_title lookup
+    has_story_titles = load_story_titles(con, story_titles_path)
+    if has_story_titles:
+        con.execute("""
+            ALTER TABLE events ADD COLUMN IF NOT EXISTS story_title VARCHAR;
+            UPDATE events SET story_title = st.story_title
+            FROM story_titles st WHERE events.story_id = st.story_id;
+        """)
+        matched = con.execute("""
+            SELECT COUNT(DISTINCT story_id) FROM events
+            WHERE story_id IS NOT NULL AND story_title IS NOT NULL
+        """).fetchone()[0]
+        total = con.execute("""
+            SELECT COUNT(DISTINCT story_id) FROM events
+            WHERE story_id IS NOT NULL
+        """).fetchone()[0]
+        log(f"  Matched {matched}/{total} story IDs to titles")
+
     # Export Parquet files
     export_parquet_files(con, output_dir)
 
@@ -1113,6 +1167,7 @@ def process_campaignwe(input_file=None, full_refresh=False):
     log("\nCleaning up intermediate tables...")
     db_size_before = os.path.getsize(db_path) / (1024 * 1024)
     con.execute("DROP TABLE IF EXISTS hr_history")
+    con.execute("DROP TABLE IF EXISTS story_titles")
     con.execute("DROP TABLE IF EXISTS events_raw")
     con.execute("VACUUM")
     con.execute("CHECKPOINT")

@@ -626,6 +626,8 @@
             return s.includes('T') ? s.split('T')[0] : s;
         }
 
+        function storyLabel(d) { return d.story_title || ('Story ' + d.story_id); }
+
         function formatNumber(num) {
             if (num === null || num === undefined) return '\u2014';
             return Number(num).toLocaleString('en-US', { maximumFractionDigits: 0 });
@@ -1181,16 +1183,16 @@
         // =====================================================================
         async function renderStoryReads() {
             const data = await q(`
-                SELECT story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads FROM events
+                SELECT story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
-                GROUP BY 1 ORDER BY reads DESC LIMIT 20
+                GROUP BY story_id ORDER BY reads DESC LIMIT 20
             `);
             const values = data.map(d => Number(d.reads));
             const pcts = pctArray(values);
             destroyChart('storyReads');
             charts.storyReads = new Chart(document.getElementById('chartStoryReads').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     layout: { padding: { right: 80 } },
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
@@ -1201,16 +1203,16 @@
 
         async function renderStoryReaders() {
             const data = await q(`
-                SELECT story_id, COUNT(DISTINCT gpn) as readers FROM events
+                SELECT story_id, MAX(story_title) as story_title, COUNT(DISTINCT gpn) as readers FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
-                GROUP BY 1 ORDER BY readers DESC LIMIT 20
+                GROUP BY story_id ORDER BY readers DESC LIMIT 20
             `);
             const values = data.map(d => Number(d.readers));
             const pcts = pctArray(values);
             destroyChart('storyReaders');
             charts.storyReaders = new Chart(document.getElementById('chartStoryReaders').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => 'Story ' + d.story_id), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     layout: { padding: { right: 80 } },
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
@@ -1221,17 +1223,17 @@
 
         async function renderFunnel() {
             const data = await q(`
-                SELECT story_id,
+                SELECT story_id, MAX(story_title) as story_title,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
                        CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides,
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
                        CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
                        CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as vp
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
-                GROUP BY 1 ORDER BY reads DESC LIMIT 10
+                GROUP BY story_id ORDER BY reads DESC LIMIT 10
             `);
             destroyChart('funnel');
-            const labels = data.map(d => 'Story ' + d.story_id);
+            const labels = data.map(d => storyLabel(d));
             const metrics = [
                 { key: 'reads', label: 'Read', color: '#404040' },
                 { key: 'hides', label: 'Hide', color: COLORS.info },
@@ -1254,45 +1256,48 @@
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10),
                      top_d AS (SELECT hr_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_division as div, story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                SELECT hr_division as div, story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_division IN (SELECT * FROM top_d)
                 GROUP BY 1, 2
             `);
             const stories = [...new Set(data.map(d => d.story_id))];
             const divs = [...new Set(data.map(d => d.div))];
+            const storyNames = {}; data.forEach(d => { storyNames[d.story_id] = storyLabel(d); });
             const map = {}; data.forEach(d => { map[d.div + '|' + d.story_id] = Number(d.reads); });
             const maxVal = Math.max(...data.map(d => Number(d.reads)), 1);
 
-            const headers = ['Division', ...stories.map(s => 'Story ' + s)];
+            const headers = ['Division', ...stories.map(s => storyNames[s])];
             const rows = divs.map(div => [div, ...stories.map(s => map[div + '|' + s] || 0)]);
             tableData.divStoryHeatmap = { headers, rows };
-            document.getElementById('divStoryHeatmap').innerHTML = renderHeatmapTable(divs, stories.map(s => 'Story ' + s), (r, c) => map[divs[r] + '|' + stories[c]] || 0, maxVal);
+            document.getElementById('divStoryHeatmap').innerHTML = renderHeatmapTable(divs, stories.map(s => storyNames[s]), (r, c) => map[divs[r] + '|' + stories[c]] || 0, maxVal);
         }
 
         async function renderRegStoryHeatmap() {
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_region as reg, story_id, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                SELECT hr_region as reg, story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_region IS NOT NULL
                 GROUP BY 1, 2
             `);
             const stories = [...new Set(data.map(d => d.story_id))];
             const regs = [...new Set(data.map(d => d.reg))];
+            const storyNames = {}; data.forEach(d => { storyNames[d.story_id] = storyLabel(d); });
             const map = {}; data.forEach(d => { map[d.reg + '|' + d.story_id] = Number(d.reads); });
             const maxVal = Math.max(...data.map(d => Number(d.reads)), 1);
 
-            const headers = ['Region', ...stories.map(s => 'Story ' + s)];
+            const headers = ['Region', ...stories.map(s => storyNames[s])];
             const rows = regs.map(reg => [reg, ...stories.map(s => map[reg + '|' + s] || 0)]);
             tableData.regStoryHeatmap = { headers, rows };
-            document.getElementById('regStoryHeatmap').innerHTML = renderHeatmapTable(regs, stories.map(s => 'Story ' + s), (r, c) => map[regs[r] + '|' + stories[c]] || 0, maxVal);
+            document.getElementById('regStoryHeatmap').innerHTML = renderHeatmapTable(regs, stories.map(s => storyNames[s]), (r, c) => map[regs[r] + '|' + stories[c]] || 0, maxVal);
         }
 
         async function renderStoryDaily() {
             const top5 = await q(`
-                SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
-                GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 5
+                SELECT story_id, MAX(story_title) as story_title FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
+                GROUP BY story_id ORDER BY COUNT(*) DESC LIMIT 5
             `);
             const sids = top5.map(d => d.story_id);
+            const storyNames = {}; top5.forEach(d => { storyNames[d.story_id] = storyLabel(d); });
             if (!sids.length) { destroyChart('storyDaily'); return; }
 
             const data = await q(`
@@ -1303,7 +1308,7 @@
             const dates = [...new Set(data.map(d => toDateStr(d.date)))].sort();
             const datasets = sids.map((sid, i) => {
                 const m = {}; data.filter(d => d.story_id === sid).forEach(d => { m[toDateStr(d.date)] = Number(d.reads); });
-                return { label: 'Story ' + sid, data: dates.map(dt => m[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
+                return { label: storyNames[sid], data: dates.map(dt => m[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
             });
             destroyChart('storyDaily');
             charts.storyDaily = new Chart(document.getElementById('chartStoryDaily').getContext('2d'), {
