@@ -13,6 +13,9 @@ data/*.db.wal
 # Output files
 output/*.parquet
 
+# Auth token cache
+config/.token_cache.bin
+
 # Python
 __pycache__/
 *.pyc

@@ -1,0 +1,13 @@
+{
+    "site_url": "https://YOUR_TENANT.sharepoint.com/sites/YOUR_SITE",
+    "list_name": "Story Titles",
+
+    "auth": {
+        "tenant_id": "YOUR_TENANT_ID"
+    },
+
+    "columns": {
+        "story_id": "StoryID",
+        "story_title": "Title"
+    }
+}
