@@ -1,198 +1,114 @@
 """
-Fetch story titles from a SharePoint list and save as Parquet lookup table.
+Convert a SharePoint list export (Excel/CSV) to Parquet lookup table.
 
-Uses device-code flow: the script shows a code, you sign in via browser
-with your corporate AD credentials (+ Authenticator), and the token flows back.
-Tokens are cached locally so you only re-authenticate when the session expires.
+Steps:
+  1. Export the SharePoint list via "Export to Excel" in your browser
+  2. Place the .xlsx or .csv file in the input/ folder
+  3. Run this script — it reads the newest file and saves story_titles.parquet
 
 Usage:
-    python fetch_story_titles.py              # fetch and save to output/story_titles.parquet
-    python fetch_story_titles.py --preview    # fetch and print without saving
+    python fetch_story_titles.py              # convert and save to output/story_titles.parquet
+    python fetch_story_titles.py --preview    # read and print without saving
 
 Prerequisites:
-    pip install msal requests pandas pyarrow
+    pip install pandas pyarrow openpyxl
 """
 
-import json
 import sys
 from pathlib import Path
 
-import msal
 import pandas as pd
-import requests
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-CONFIG_PATH = SCRIPT_DIR / "config" / "sharepoint.json"
+INPUT_DIR = SCRIPT_DIR / "input"
 OUTPUT_PATH = SCRIPT_DIR / "output" / "story_titles.parquet"
-TOKEN_CACHE_PATH = SCRIPT_DIR / "config" / ".token_cache.bin"
 
-# Microsoft Graph PowerShell public client ID — pre-authorized for
-# Microsoft Graph API access in corporate tenants.
-WELL_KNOWN_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+# Column mapping: our_name -> SharePoint column name(s) to look for
+COLUMN_MAP = {
+    "story_id": ["StoryID", "Story ID", "storyid", "story_id"],
+    "story_title": ["Title", "Story Title", "title", "story_title"],
+}
 
-SCOPES = ["https://graph.microsoft.com/Sites.Read.All"]
 
+def find_input_file():
+    """Find the newest .xlsx or .csv file in the input/ folder."""
+    INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-def load_config():
-    if not CONFIG_PATH.exists():
-        print(f"ERROR: Config file not found at {CONFIG_PATH}")
+    candidates = list(INPUT_DIR.glob("*.xlsx")) + list(INPUT_DIR.glob("*.csv"))
+    # Exclude Excel temp files
+    candidates = [f for f in candidates if not f.name.startswith("~$")]
+
+    if not candidates:
+        print(f"ERROR: No .xlsx or .csv files found in {INPUT_DIR}/")
+        print(f"       Export the SharePoint list and place the file there.")
         sys.exit(1)
 
-    with open(CONFIG_PATH, "r") as f:
-        cfg = json.load(f)
-
-    for key in ("site_url", "list_name"):
-        if not cfg.get(key) or "YOUR_" in cfg[key]:
-            print(f"ERROR: Please set '{key}' in {CONFIG_PATH}")
-            sys.exit(1)
-
-    auth = cfg.get("auth", {})
-    if not auth.get("tenant_id") or "YOUR_" in auth["tenant_id"]:
-        print(f"ERROR: Please set 'auth.tenant_id' in {CONFIG_PATH}")
-        sys.exit(1)
-
-    return cfg
+    newest = max(candidates, key=lambda f: f.stat().st_mtime)
+    return newest
 
 
-def build_msal_app(tenant_id):
-    """Build a public client MSAL app with persistent token cache."""
-    cache = msal.SerializableTokenCache()
-    if TOKEN_CACHE_PATH.exists():
-        cache.deserialize(TOKEN_CACHE_PATH.read_text())
-
-    app = msal.PublicClientApplication(
-        WELL_KNOWN_CLIENT_ID,
-        authority=f"https://login.microsoftonline.com/{tenant_id}",
-        token_cache=cache,
-    )
-    return app, cache
+def read_file(path):
+    """Read an Excel or CSV file into a DataFrame."""
+    if path.suffix.lower() == ".csv":
+        return pd.read_csv(path)
+    else:
+        return pd.read_excel(path)
 
 
-def save_cache(cache):
-    """Persist the token cache if it changed."""
-    if cache.has_state_changed:
-        TOKEN_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TOKEN_CACHE_PATH.write_text(cache.serialize())
-
-
-def get_access_token(cfg):
-    """Acquire token via device-code flow with cached refresh tokens."""
-    tenant_id = cfg["auth"]["tenant_id"]
-    app, cache = build_msal_app(tenant_id)
-
-    # Try cached accounts first (silent token refresh)
-    accounts = app.get_accounts()
-    if accounts:
-        result = app.acquire_token_silent(SCOPES, account=accounts[0])
-        if result and "access_token" in result:
-            print("  Using cached credentials (no sign-in needed)")
-            save_cache(cache)
-            return result["access_token"]
-
-    # No cached token — initiate device-code flow
-    flow = app.initiate_device_flow(scopes=SCOPES)
-    if "user_code" not in flow:
-        print(f"ERROR: Could not initiate device flow: {flow.get('error_description')}")
-        sys.exit(1)
-
-    print()
-    print(flow["message"])  # "To sign in, use a web browser to open ... and enter the code ..."
-    print()
-
-    result = app.acquire_token_by_device_flow(flow)
-
-    if "access_token" not in result:
-        print("ERROR: Authentication failed.")
-        print(f"  Error: {result.get('error')}")
-        print(f"  Description: {result.get('error_description')}")
-        sys.exit(1)
-
-    save_cache(cache)
-    return result["access_token"]
-
-
-def get_sharepoint_site_id(token, site_url):
-    """Resolve a SharePoint site URL to a Graph site ID."""
-    from urllib.parse import urlparse
-    parsed = urlparse(site_url.rstrip("/"))
-    hostname = parsed.hostname
-    site_path = parsed.path.rstrip("/")
-
-    url = f"https://graph.microsoft.com/v1.0/sites/{hostname}:{site_path}"
-    headers = {"Authorization": f"Bearer {token}"}
-    resp = requests.get(url, headers=headers)
-    resp.raise_for_status()
-
-    return resp.json()["id"]
-
-
-def fetch_list_items(token, site_id, list_name, columns):
-    """Fetch all items from a SharePoint list via Microsoft Graph, handling pagination."""
-    headers = {"Authorization": f"Bearer {token}", "Prefer": "HonorNonIndexedQueriesWarningMayFailRandomly"}
-
-    sp_cols = list(columns.values())
-    select = ",".join(sp_cols)
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_name}/items?$expand=fields($select={select})&$top=500"
-
-    all_items = []
-    while url:
-        resp = requests.get(url, headers=headers)
-        resp.raise_for_status()
-        data = resp.json()
-        all_items.extend(data.get("value", []))
-        url = data.get("@odata.nextLink")
-
-    return all_items
-
-
-def items_to_dataframe(items, columns):
-    """Convert Graph API list items to a DataFrame with our column names."""
-    rows = []
-    for item in items:
-        fields = item.get("fields", {})
-        row = {}
-        for our_name, sp_name in columns.items():
-            row[our_name] = fields.get(sp_name)
-        rows.append(row)
-
-    df = pd.DataFrame(rows)
-
-    if "story_id" in df.columns:
-        df["story_id"] = df["story_id"].astype(str).str.strip()
-
-    return df
+def resolve_column(df, candidates):
+    """Find the first matching column name from a list of candidates."""
+    for name in candidates:
+        for col in df.columns:
+            if col.strip().lower() == name.lower():
+                return col
+    return None
 
 
 def main():
     preview = "--preview" in sys.argv
 
-    print("Loading config...")
-    cfg = load_config()
-    columns = cfg.get("columns", {"story_id": "StoryID", "story_title": "Title"})
+    print("Looking for input file...")
+    input_file = find_input_file()
+    print(f"  Found: {input_file.name}")
 
-    print("Authenticating...")
-    token = get_access_token(cfg)
+    print("Reading file...")
+    df = read_file(input_file)
+    print(f"  Read {len(df)} rows, columns: {list(df.columns)}")
 
-    print(f"Resolving site: {cfg['site_url']}")
-    site_id = get_sharepoint_site_id(token, cfg["site_url"])
+    # Map columns
+    mapped = {}
+    for our_name, candidates in COLUMN_MAP.items():
+        col = resolve_column(df, candidates)
+        if col is None:
+            print(f"ERROR: Could not find column for '{our_name}'.")
+            print(f"       Expected one of: {candidates}")
+            print(f"       Found columns: {list(df.columns)}")
+            sys.exit(1)
+        mapped[our_name] = col
 
-    print(f"Fetching list: {cfg['list_name']}")
-    items = fetch_list_items(token, site_id, cfg["list_name"], columns)
-    print(f"  Retrieved {len(items)} items")
+    result = df[[mapped["story_id"], mapped["story_title"]]].copy()
+    result.columns = ["story_id", "story_title"]
 
-    df = items_to_dataframe(items, columns)
+    # Clean up
+    result["story_id"] = result["story_id"].astype(str).str.strip()
+    result = result.dropna(subset=["story_id"])
+    result = result[result["story_id"] != ""]
 
-    if preview or df.empty:
+    print(f"  Mapped {len(result)} stories")
+
+    if preview or result.empty:
         print("\n--- Story Titles ---")
-        print(df.to_string(index=False))
-        if df.empty:
+        print(result.to_string(index=False))
+        if result.empty:
             print("  (no items found)")
         return
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(OUTPUT_PATH, index=False)
-    print(f"\nSaved {len(df)} stories to {OUTPUT_PATH}")
-    print(df.to_string(index=False))
+    result.to_parquet(OUTPUT_PATH, index=False)
+    print(f"\nSaved {len(result)} stories to {OUTPUT_PATH}")
+    print(result.head(10).to_string(index=False))
+    if len(result) > 10:
+        print(f"  ... and {len(result) - 10} more")
 
 
 if __name__ == "__main__":

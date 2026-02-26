@@ -22,7 +22,7 @@ Input folder: input/
 Output:
     - data/campaignwe.db                (DuckDB database)
     - output/events_raw.parquet         (all event-level data with HR fields)
-    - output/events_anon.parquet        (anonymized: no GPN or email columns)
+    - output/events_anon.parquet        (anonymized: GPNs hashed, emails dropped)
     - output/events_daily.parquet       (aggregated by day)
     - output/events_story.parquet       (story engagement by day, division, region)
 
@@ -687,24 +687,37 @@ def export_parquet_files(con, output_dir):
     raw_size = os.path.getsize(raw_file) / (1024 * 1024)
     log(f"  events_raw.parquet ({raw_count:,} rows, {raw_size:.1f} MB)")
 
-    # Anonymized data export (strip PII columns)
+    # Anonymized data export (hash GPNs, drop emails)
     anon_file = output_dir / 'events_anon.parquet'
     if anon_file.exists():
         anon_file.unlink()
 
-    # Determine which PII columns exist in the events table to exclude
     events_schema = con.execute("DESCRIBE events").df()
     all_cols = events_schema['column_name'].tolist()
-    pii_columns = {'gpn', 'email', 'CP_GPN', 'CP_Email'}
-    pii_to_exclude = [c for c in all_cols if c in pii_columns]
+    hash_columns = {'gpn', 'CP_GPN'}
+    drop_columns = {'email', 'CP_Email'}
 
-    if pii_to_exclude:
-        exclude_list = ', '.join(pii_to_exclude)
-        con.execute(f"COPY (SELECT * EXCLUDE ({exclude_list}) FROM events) TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-        log(f"  events_anon.parquet ({raw_count:,} rows, stripped: {', '.join(pii_to_exclude)})")
-    else:
-        con.execute(f"COPY events TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-        log(f"  events_anon.parquet ({raw_count:,} rows, no PII columns found to strip)")
+    cols_to_hash = [c for c in all_cols if c in hash_columns]
+    cols_to_drop = [c for c in all_cols if c in drop_columns]
+    cols_kept = [c for c in all_cols if c not in drop_columns]
+
+    select_parts = []
+    for c in cols_kept:
+        if c in hash_columns:
+            alias = c.replace('gpn', 'person_hash').replace('GPN', 'Person_Hash')
+            select_parts.append(f"sha256(CAST({c} AS VARCHAR))::VARCHAR AS {alias}")
+        else:
+            select_parts.append(c)
+
+    select_sql = ', '.join(select_parts)
+    con.execute(f"COPY (SELECT {select_sql} FROM events) TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+
+    changes = []
+    if cols_to_hash:
+        changes.append(f"hashed: {', '.join(cols_to_hash)}")
+    if cols_to_drop:
+        changes.append(f"dropped: {', '.join(cols_to_drop)}")
+    log(f"  events_anon.parquet ({raw_count:,} rows, {'; '.join(changes) or 'no changes'})")
 
     anon_size = os.path.getsize(anon_file) / (1024 * 1024)
     log(f"  events_anon.parquet size: {anon_size:.1f} MB")
