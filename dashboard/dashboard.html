@@ -9,8 +9,8 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
 
-    <!-- SheetJS for XLSX export -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- ExcelJS for styled XLSX export -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 
     <!-- DuckDB WASM -->
     <script type="module">
@@ -222,6 +222,7 @@
                 <label>To:</label>
                 <input type="date" id="dateTo" onchange="applyCustomDate()">
             </div>
+            <button class="export-btn" onclick="exportAllTabs(event)" style="background:var(--primary);color:var(--white);border-color:var(--primary);padding:0.3rem 0.8rem;font-weight:600;cursor:pointer;">Export All XLSX</button>
             <div class="status-indicator loading" id="statusIndicator">
                 <div class="dot"></div>
                 <span id="statusText">Loading...</span>
@@ -252,6 +253,7 @@
 
             <!-- TAB 1: Overview -->
             <div class="nav-content active" id="tabOverview">
+                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabOverview')">Export Tab XLSX</button></div>
                 <div class="kpi-grid" id="kpiGrid"></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
@@ -267,7 +269,12 @@
                         <div class="chart-container"><canvas id="chartWeekday"></canvas></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Activity Heatmap <span class="chart-subtitle">Weekday × Hour (CET)</span></div>
+                        <div class="chart-title">Activity Heatmap <span class="chart-subtitle">Weekday × Hour (CET)</span>
+                            <div class="export-toolbar" style="display:inline-flex;margin-left:1rem;">
+                                <button class="export-btn" onclick="exportTable('weekdayHourly', 'csv')">CSV</button>
+                                <button class="export-btn" onclick="exportTable('weekdayHourly', 'xlsx')">XLSX</button>
+                            </div>
+                        </div>
                         <div class="table-container" id="weekdayHourlyHeatmap"></div>
                     </div>
                     <div class="chart-card">
@@ -283,6 +290,7 @@
 
             <!-- TAB 2: Divisions & Regions -->
             <div class="nav-content" id="tabDivisions">
+                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabDivisions')">Export Tab XLSX</button></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
                         <div class="chart-title">Business Division — Clicks <span class="chart-subtitle">Click bars to drill down</span></div>
@@ -313,6 +321,7 @@
 
             <!-- TAB 3: Stories -->
             <div class="nav-content" id="tabStories">
+                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabStories')">Export Tab XLSX</button></div>
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-title">Top Stories by Reads</div>
@@ -355,6 +364,7 @@
 
             <!-- TAB 4: Data Quality -->
             <div class="nav-content" id="tabQuality">
+                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabQuality')">Export Tab XLSX</button></div>
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-title">GPN → HR Mapping Coverage</div>
@@ -376,7 +386,12 @@
                     <div class="table-container" id="unmatchedGpnTable"></div>
                 </div>
                 <div class="chart-card full-width" style="margin-top: 1rem;">
-                    <div class="chart-title">Field Coverage</div>
+                    <div class="chart-title">Field Coverage
+                        <div class="export-toolbar" style="display:inline-flex;margin-left:1rem;">
+                            <button class="export-btn" onclick="exportTable('fieldCoverage', 'csv')">CSV</button>
+                            <button class="export-btn" onclick="exportTable('fieldCoverage', 'xlsx')">XLSX</button>
+                        </div>
+                    </div>
                     <div class="table-container" id="fieldCoverageTable"></div>
                 </div>
             </div>
@@ -412,6 +427,325 @@
         ];
 
         const HEATMAP_STOPS = ['#FFFFFF','#F5F0E1','#E4A911','#E60000','#8A000A'];
+
+        // =====================================================================
+        // EXCEL EXPORT STYLES & UTILITIES
+        // =====================================================================
+        const EXCEL_STYLES = {
+            headerFill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF404040' } },
+            headerFont:      { bold: true, color: { argb: 'FFFFFFFF' }, size: 10, name: 'Calibri' },
+            headerAlignment: { vertical: 'middle', horizontal: 'left', wrapText: true },
+            headerBorder:    { bottom: { style: 'thin', color: { argb: 'FFCCCABC' } } },
+            rowAltFill:      { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8F7F2' } },
+            dataFont:        { size: 10, name: 'Calibri', color: { argb: 'FF404040' } },
+            subtitleFont:    { bold: true, size: 11, color: { argb: 'FF404040' }, name: 'Calibri' },
+            numAlign:        { vertical: 'middle', horizontal: 'right' },
+            textAlign:       { vertical: 'middle', horizontal: 'left' },
+        };
+
+        function rgbToArgb(colorStr) {
+            if (colorStr.startsWith('#')) return 'FF' + colorStr.slice(1).toUpperCase();
+            const m = colorStr.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+            if (m) return 'FF' + [m[1], m[2], m[3]].map(v => parseInt(v).toString(16).padStart(2, '0')).join('').toUpperCase();
+            return 'FF000000';
+        }
+
+        function downloadExcelBuffer(buffer, filename) {
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = filename; a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }
+
+        function autoSizeColumns(ws) {
+            ws.columns.forEach(col => {
+                let maxLen = 10;
+                col.eachCell({ includeEmpty: false }, cell => {
+                    const len = cell.value ? String(cell.value).length : 0;
+                    if (len > maxLen) maxLen = len;
+                });
+                col.width = Math.min(maxLen + 2, 50);
+            });
+        }
+
+        function addSectionTitle(ws, row, title, colSpan) {
+            const span = colSpan || 10;
+            const cell = ws.getRow(row).getCell(1);
+            cell.value = title;
+            cell.font = EXCEL_STYLES.subtitleFont;
+            if (span > 1) ws.mergeCells(row, 1, row, span);
+            return row + 1;
+        }
+
+        function addStyledTable(ws, startRow, headers, rows, options) {
+            const opts = options || {};
+            const rightAlign = opts.rightAlign || [];
+            const isHeatmap = !!opts.isHeatmap;
+            const maxVal = opts.maxVal || 0;
+
+            // Header row
+            const hdr = ws.getRow(startRow);
+            headers.forEach((h, i) => {
+                const c = hdr.getCell(i + 1);
+                c.value = h;
+                c.fill = EXCEL_STYLES.headerFill;
+                c.font = EXCEL_STYLES.headerFont;
+                c.alignment = rightAlign[i] ? { ...EXCEL_STYLES.numAlign, wrapText: true } : EXCEL_STYLES.headerAlignment;
+                c.border = EXCEL_STYLES.headerBorder;
+            });
+            hdr.height = 22;
+
+            // Data rows
+            rows.forEach((row, ri) => {
+                const exRow = ws.getRow(startRow + 1 + ri);
+                row.forEach((val, ci) => {
+                    const c = exRow.getCell(ci + 1);
+                    c.value = val;
+                    c.font = EXCEL_STYLES.dataFont;
+                    c.alignment = rightAlign[ci] ? EXCEL_STYLES.numAlign : EXCEL_STYLES.textAlign;
+                    if (ri % 2 === 1) c.fill = EXCEL_STYLES.rowAltFill;
+
+                    // Heatmap coloring (skip first col = row header)
+                    if (isHeatmap && ci > 0 && typeof val === 'number' && val > 0) {
+                        c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rgbToArgb(heatColor(val, maxVal)) } };
+                        c.font = { ...EXCEL_STYLES.dataFont, color: { argb: rgbToArgb(textColorForBg(val, maxVal)) } };
+                    }
+                });
+            });
+
+            return startRow + 1 + rows.length + 1;
+        }
+
+        function addChartImage(wb, ws, chartKey, startRow, startCol, endCol, rowSpan) {
+            const chart = charts[chartKey];
+            if (!chart) return startRow;
+            try {
+                const b64 = chart.toBase64Image('image/png', 1);
+                const data = b64.split(',')[1];
+                if (!data) return startRow;
+                const imgId = wb.addImage({ base64: data, extension: 'png' });
+                ws.addImage(imgId, { tl: { col: startCol, row: startRow }, br: { col: endCol, row: startRow + rowSpan }, editAs: 'oneCell' });
+            } catch (e) { console.warn('Chart image export failed for', chartKey, e); }
+            return startRow + rowSpan + 1;
+        }
+
+        // --- Per-tab worksheet composers ---
+
+        function buildOverviewSheet(wb) {
+            const ws = wb.addWorksheet('Overview');
+            let r = 1;
+            r = addSectionTitle(ws, r, 'Overview', 10); r++;
+
+            if (tableData.kpis) {
+                r = addSectionTitle(ws, r, 'Key Performance Indicators');
+                r = addStyledTable(ws, r, tableData.kpis.headers, tableData.kpis.rows);
+            }
+
+            r = addSectionTitle(ws, r, 'Daily Activity');
+            r = addChartImage(wb, ws, 'dailyTrends', r, 0, 10, 20);
+
+            r = addSectionTitle(ws, r, 'Clicks by Hour / Clicks by Weekday');
+            const sideRow = r;
+            addChartImage(wb, ws, 'hourly', sideRow, 0, 5, 15);
+            r = addChartImage(wb, ws, 'weekday', sideRow, 5, 10, 15);
+
+            if (tableData.weekdayHourly) {
+                const cols = tableData.weekdayHourly.headers.length;
+                r = addSectionTitle(ws, r, 'Activity Heatmap (Weekday × Hour)', cols);
+                r = addStyledTable(ws, r, tableData.weekdayHourly.headers, tableData.weekdayHourly.rows, {
+                    isHeatmap: true, maxVal: tableData.weekdayHourly.maxVal,
+                    rightAlign: [false, ...Array(24).fill(true)]
+                });
+            }
+
+            r = addSectionTitle(ws, r, 'Action Types / Link Types');
+            const sideRow2 = r;
+            addChartImage(wb, ws, 'actions', sideRow2, 0, 5, 15);
+            r = addChartImage(wb, ws, 'linkTypes', sideRow2, 5, 10, 15);
+
+            autoSizeColumns(ws);
+        }
+
+        function buildDivisionsSheet(wb) {
+            const ws = wb.addWorksheet('Divisions & Regions');
+            let r = 1;
+            r = addSectionTitle(ws, r, 'Divisions & Regions', 10); r++;
+
+            r = addSectionTitle(ws, r, 'Business Division — Clicks');
+            r = addChartImage(wb, ws, 'gcrsDrill', r, 0, 10, 25);
+
+            r = addSectionTitle(ws, r, 'Region / Country — Clicks');
+            r = addChartImage(wb, ws, 'regDrill', r, 0, 10, 25);
+
+            r = addSectionTitle(ws, r, 'Daily Users — Top 5 Divisions');
+            r = addChartImage(wb, ws, 'divDaily', r, 0, 10, 20);
+
+            if (tableData.divDepth) {
+                r = addSectionTitle(ws, r, 'Engagement Depth by Division');
+                r = addStyledTable(ws, r, tableData.divDepth.headers, tableData.divDepth.rows, {
+                    rightAlign: [false, true, true, true, true, true, true, true]
+                });
+            }
+
+            autoSizeColumns(ws);
+        }
+
+        function buildStoriesSheet(wb) {
+            const ws = wb.addWorksheet('Stories');
+            let r = 1;
+            r = addSectionTitle(ws, r, 'Stories', 10); r++;
+
+            r = addSectionTitle(ws, r, 'Top Stories by Reads / Unique Readers');
+            const sideRow = r;
+            addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 25);
+            r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 25);
+
+            r = addSectionTitle(ws, r, 'Engagement Funnel — Top 10 Stories');
+            r = addChartImage(wb, ws, 'funnel', r, 0, 10, 20);
+
+            if (tableData.divStoryHeatmap) {
+                const cols = tableData.divStoryHeatmap.headers.length;
+                r = addSectionTitle(ws, r, 'Reads: Division × Story', cols);
+                r = addStyledTable(ws, r, tableData.divStoryHeatmap.headers, tableData.divStoryHeatmap.rows, {
+                    isHeatmap: true, maxVal: tableData.divStoryHeatmap.maxVal,
+                    rightAlign: [false, ...Array(cols - 1).fill(true)]
+                });
+            }
+
+            if (tableData.regStoryHeatmap) {
+                const cols = tableData.regStoryHeatmap.headers.length;
+                r = addSectionTitle(ws, r, 'Reads: Region × Story', cols);
+                r = addStyledTable(ws, r, tableData.regStoryHeatmap.headers, tableData.regStoryHeatmap.rows, {
+                    isHeatmap: true, maxVal: tableData.regStoryHeatmap.maxVal,
+                    rightAlign: [false, ...Array(cols - 1).fill(true)]
+                });
+            }
+
+            r = addSectionTitle(ws, r, 'Daily Reads — Top 5 Stories');
+            r = addChartImage(wb, ws, 'storyDaily', r, 0, 10, 20);
+
+            autoSizeColumns(ws);
+        }
+
+        function buildDataQualitySheet(wb) {
+            const ws = wb.addWorksheet('Data Quality');
+            let r = 1;
+            r = addSectionTitle(ws, r, 'Data Quality', 10); r++;
+
+            r = addSectionTitle(ws, r, 'GPN Coverage / Length Distribution');
+            const sideRow = r;
+            addChartImage(wb, ws, 'gpnCoverage', sideRow, 0, 5, 15);
+            r = addChartImage(wb, ws, 'gpnLength', sideRow, 5, 10, 15);
+
+            if (tableData.unmatchedGpns) {
+                r = addSectionTitle(ws, r, 'Unmatched GPNs');
+                r = addStyledTable(ws, r, tableData.unmatchedGpns.headers, tableData.unmatchedGpns.rows, {
+                    rightAlign: [false, true, true, false, false, false]
+                });
+            }
+
+            if (tableData.fieldCoverage) {
+                r = addSectionTitle(ws, r, 'Field Coverage');
+                r = addStyledTable(ws, r, tableData.fieldCoverage.headers, tableData.fieldCoverage.rows, {
+                    rightAlign: [false, true, true, true]
+                });
+            }
+
+            autoSizeColumns(ws);
+        }
+
+        // --- Export orchestrators ---
+
+        async function exportAllTabs(evt) {
+            const btn = evt && evt.target;
+            const origText = btn ? btn.textContent : '';
+            try {
+                if (btn) { btn.textContent = 'Exporting…'; btn.disabled = true; }
+
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'Campaign Dashboard';
+                wb.created = new Date();
+
+                // Temporarily show all tabs so Chart.js canvases have dimensions
+                const activeTabId = document.querySelector('.nav-content.active')?.id;
+                const allTabIds = ['tabOverview', 'tabDivisions', 'tabStories', 'tabQuality'];
+                allTabIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    el.classList.add('active');
+                    el.style.display = 'block';
+                });
+                await new Promise(r => setTimeout(r, 300));
+
+                try {
+                    buildOverviewSheet(wb);
+                    buildDivisionsSheet(wb);
+                    buildStoriesSheet(wb);
+                    buildDataQualitySheet(wb);
+                } finally {
+                    // Restore tab state
+                    allTabIds.forEach(id => {
+                        const el = document.getElementById(id);
+                        el.classList.remove('active');
+                        el.style.display = '';
+                    });
+                    if (activeTabId) {
+                        document.getElementById(activeTabId).classList.add('active');
+                    }
+                }
+
+                const buffer = await wb.xlsx.writeBuffer();
+                downloadExcelBuffer(buffer, `campaignwe_dashboard_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}.xlsx`);
+            } catch (err) {
+                console.error('Export failed:', err);
+                alert('Export failed: ' + err.message);
+            } finally {
+                if (btn) { btn.textContent = origText; btn.disabled = false; }
+            }
+        }
+
+        async function exportSingleTab(evt, tabKey) {
+            const btn = evt && evt.target;
+            const origText = btn ? btn.textContent : '';
+            try {
+                if (btn) { btn.textContent = 'Exporting…'; btn.disabled = true; }
+
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'Campaign Dashboard';
+                wb.created = new Date();
+
+                // Ensure tab is visible for chart capture
+                const tabEl = document.getElementById(tabKey);
+                const wasHidden = !tabEl.classList.contains('active');
+                if (wasHidden) {
+                    tabEl.classList.add('active');
+                    tabEl.style.display = 'block';
+                    await new Promise(r => setTimeout(r, 300));
+                }
+
+                const builders = {
+                    tabOverview: buildOverviewSheet,
+                    tabDivisions: buildDivisionsSheet,
+                    tabStories: buildStoriesSheet,
+                    tabQuality: buildDataQualitySheet,
+                };
+                try { builders[tabKey](wb); } finally {
+                    if (wasHidden) {
+                        tabEl.classList.remove('active');
+                        tabEl.style.display = '';
+                    }
+                }
+
+                const names = { tabOverview: 'overview', tabDivisions: 'divisions', tabStories: 'stories', tabQuality: 'quality' };
+                const buffer = await wb.xlsx.writeBuffer();
+                downloadExcelBuffer(buffer, `campaignwe_${names[tabKey]}_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}.xlsx`);
+            } catch (err) {
+                console.error('Export failed:', err);
+                alert('Export failed: ' + err.message);
+            } finally {
+                if (btn) { btn.textContent = origText; btn.disabled = false; }
+            }
+        }
 
         // GCRS hierarchy drilldown
         const GCRS_LEVELS = ['hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function'];
@@ -748,7 +1082,7 @@
         // =====================================================================
         // EXPORT
         // =====================================================================
-        function exportTable(key, format) {
+        async function exportTable(key, format) {
             const data = tableData[key];
             if (!data || !data.headers || !data.rows || data.rows.length === 0) return;
             const prefix = `campaignwe_${key}_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}`;
@@ -760,16 +1094,21 @@
                 const a = document.createElement('a'); a.href = url; a.download = prefix + '.csv'; a.click();
                 URL.revokeObjectURL(url);
             } else if (format === 'xlsx') {
-                if (typeof XLSX === 'undefined') { alert('XLSX library not loaded.'); return; }
-                const wsData = [data.headers, ...data.rows];
-                const ws = XLSX.utils.aoa_to_sheet(wsData);
-                ws['!cols'] = data.headers.map((h, i) => {
-                    const maxLen = Math.max(h.length, ...data.rows.slice(0, 100).map(r => String(r[i] || '').length));
-                    return { wch: Math.min(maxLen + 2, 40) };
-                });
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, key);
-                XLSX.writeFile(wb, prefix + '.xlsx');
+                try {
+                    const wb = new ExcelJS.Workbook();
+                    const ws = wb.addWorksheet(key);
+                    addStyledTable(ws, 1, data.headers, data.rows, {
+                        isHeatmap: !!data.isHeatmap,
+                        maxVal: data.maxVal || 0,
+                        rightAlign: data.rightAlign || []
+                    });
+                    autoSizeColumns(ws);
+                    const buffer = await wb.xlsx.writeBuffer();
+                    downloadExcelBuffer(buffer, prefix + '.xlsx');
+                } catch (err) {
+                    console.error('XLSX export failed:', err);
+                    alert('XLSX export failed: ' + err.message);
+                }
             }
         }
 
@@ -809,6 +1148,17 @@
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const d = data[0] || {};
+            tableData.kpis = {
+                headers: ['Metric', 'Value'],
+                rows: [
+                    ['Total Clicks', Number(d.events) || 0],
+                    ['Unique Users', Number(d.users) || 0],
+                    ['Sessions', Number(d.sessions) || 0],
+                    ['Stories Viewed', Number(d.stories) || 0],
+                    ['Clicks / User', Number(d.events_per_user) || 0],
+                    ['HR Coverage %', Number(d.hr_pct) || 0],
+                ]
+            };
             document.getElementById('kpiGrid').innerHTML = [
                 kpiCard('TOTAL CLICKS', fmtNum(d.events), 'highlight'),
                 kpiCard('UNIQUE USERS', fmtNum(d.users), 'info', 'Distinct GPNs'),
@@ -899,6 +1249,11 @@
                 if (v > maxVal) maxVal = v;
             });
             const getValue = (ri, ci) => map[(ri + 1) + '_' + ci] || 0;
+            tableData.weekdayHourly = {
+                headers: ['Weekday', ...hourLabels.map(h => h + ':00')],
+                rows: dayLabels.map((day, ri) => [day, ...hourLabels.map((_, ci) => getValue(ri, ci))]),
+                isHeatmap: true, maxVal
+            };
             document.getElementById('weekdayHourlyHeatmap').innerHTML =
                 renderHeatmapTable(dayLabels, hourLabels, getValue, maxVal);
         }
@@ -1174,8 +1529,9 @@
             `);
             const headers = ['Division','Clicks','Users','Clicks/User','Stories','Reads','Likes','Shares'];
             const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes), Number(d.shares)]);
-            tableData.divDepth = { headers, rows };
-            document.getElementById('divDepthTable').innerHTML = renderHTMLTable(headers, rows, [false,true,true,true,true,true,true,true]);
+            const rightAlign = [false,true,true,true,true,true,true,true];
+            tableData.divDepth = { headers, rows, rightAlign };
+            document.getElementById('divDepthTable').innerHTML = renderHTMLTable(headers, rows, rightAlign);
         }
 
         // =====================================================================
@@ -1268,7 +1624,7 @@
 
             const headers = ['Division', ...stories.map(s => storyNames[s])];
             const rows = divs.map(div => [div, ...stories.map(s => map[div + '|' + s] || 0)]);
-            tableData.divStoryHeatmap = { headers, rows };
+            tableData.divStoryHeatmap = { headers, rows, isHeatmap: true, maxVal };
             document.getElementById('divStoryHeatmap').innerHTML = renderHeatmapTable(divs, stories.map(s => storyNames[s]), (r, c) => map[divs[r] + '|' + stories[c]] || 0, maxVal);
         }
 
@@ -1287,7 +1643,7 @@
 
             const headers = ['Region', ...stories.map(s => storyNames[s])];
             const rows = regs.map(reg => [reg, ...stories.map(s => map[reg + '|' + s] || 0)]);
-            tableData.regStoryHeatmap = { headers, rows };
+            tableData.regStoryHeatmap = { headers, rows, isHeatmap: true, maxVal };
             document.getElementById('regStoryHeatmap').innerHTML = renderHeatmapTable(regs, stories.map(s => storyNames[s]), (r, c) => map[regs[r] + '|' + stories[c]] || 0, maxVal);
         }
 
@@ -1373,7 +1729,7 @@
             `);
             const headers = ['GPN','Clicks','Sessions','First Seen','Last Seen','Sample Email'];
             const rows = data.map(d => [d.gpn, Number(d.events), Number(d.sessions), String(d.first_seen).split('T')[0], String(d.last_seen).split('T')[0], d.sample_email || '']);
-            tableData.unmatchedGpns = { headers, rows };
+            tableData.unmatchedGpns = { headers, rows, rightAlign: [false,true,true,false,false,false] };
             document.getElementById('unmatchedGpnTable').innerHTML = rows.length ? renderHTMLTable(headers, rows, [false,true,true,false,false,false]) : '<p style="padding:1rem;color:var(--medium-gray)">No unmatched GPNs in selected range.</p>';
         }
 
@@ -1394,6 +1750,7 @@
                 const nn = Number(d[f]);
                 return [f, nn.toLocaleString(), (total - nn).toLocaleString(), total > 0 ? (100 * nn / total).toFixed(1) + '%' : '0%'];
             });
+            tableData.fieldCoverage = { headers, rows, rightAlign: [false, true, true, true] };
             document.getElementById('fieldCoverageTable').innerHTML = renderHTMLTable(headers, rows, [false, true, true, true]);
         }
 
