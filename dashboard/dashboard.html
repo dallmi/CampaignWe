@@ -364,7 +364,7 @@
 
             <!-- TAB 4: Data Quality -->
             <div class="nav-content" id="tabQuality">
-                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabQuality')">Export Tab XLSX</button></div>
+                <div class="export-toolbar" style="margin-bottom:0.75rem;"></div>
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-title">GPN → HR Mapping Coverage</div>
@@ -378,19 +378,11 @@
                 <div class="chart-card full-width" style="margin-top: 1rem;">
                     <div class="chart-title">
                         Unmatched GPNs
-                        <div class="export-toolbar">
-                            <button class="export-btn" onclick="exportTable('unmatchedGpns', 'csv')">CSV</button>
-                            <button class="export-btn" onclick="exportTable('unmatchedGpns', 'xlsx')">XLSX</button>
-                        </div>
                     </div>
                     <div class="table-container" id="unmatchedGpnTable"></div>
                 </div>
                 <div class="chart-card full-width" style="margin-top: 1rem;">
                     <div class="chart-title">Field Coverage
-                        <div class="export-toolbar" style="display:inline-flex;margin-left:1rem;">
-                            <button class="export-btn" onclick="exportTable('fieldCoverage', 'csv')">CSV</button>
-                            <button class="export-btn" onclick="exportTable('fieldCoverage', 'xlsx')">XLSX</button>
-                        </div>
                     </div>
                     <div class="table-container" id="fieldCoverageTable"></div>
                 </div>
@@ -521,7 +513,7 @@
             const chart = charts[chartKey];
             if (!chart) return startRow;
             try {
-                const b64 = chart.toBase64Image('image/png', 1);
+                const b64 = chart.toBase64Image('image/png', 2);
                 const data = b64.split(',')[1];
                 if (!data) return startRow;
                 const imgId = wb.addImage({ base64: data, extension: 'png' });
@@ -573,10 +565,10 @@
             r = addSectionTitle(ws, r, 'Divisions & Regions', 10); r++;
 
             r = addSectionTitle(ws, r, 'Business Division — Clicks');
-            r = addChartImage(wb, ws, 'gcrsDrill', r, 0, 10, 25);
+            r = addChartImage(wb, ws, 'gcrsDrill', r, 0, 10, 35);
 
             r = addSectionTitle(ws, r, 'Region / Country — Clicks');
-            r = addChartImage(wb, ws, 'regDrill', r, 0, 10, 25);
+            r = addChartImage(wb, ws, 'regDrill', r, 0, 10, 35);
 
             r = addSectionTitle(ws, r, 'Daily Users — Top 5 Divisions');
             r = addChartImage(wb, ws, 'divDaily', r, 0, 10, 20);
@@ -598,8 +590,8 @@
 
             r = addSectionTitle(ws, r, 'Top Stories by Reads / Unique Readers');
             const sideRow = r;
-            addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 25);
-            r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 25);
+            addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 35);
+            r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 35);
 
             r = addSectionTitle(ws, r, 'Engagement Funnel — Top 10 Stories');
             r = addChartImage(wb, ws, 'funnel', r, 0, 10, 20);
@@ -669,7 +661,7 @@
 
                 // Temporarily show all tabs so Chart.js canvases have dimensions
                 const activeTabId = document.querySelector('.nav-content.active')?.id;
-                const allTabIds = ['tabOverview', 'tabDivisions', 'tabStories', 'tabQuality'];
+                const allTabIds = ['tabOverview', 'tabDivisions', 'tabStories'];
                 allTabIds.forEach(id => {
                     const el = document.getElementById(id);
                     el.classList.add('active');
@@ -681,7 +673,6 @@
                     buildOverviewSheet(wb);
                     buildDivisionsSheet(wb);
                     buildStoriesSheet(wb);
-                    buildDataQualitySheet(wb);
                 } finally {
                     // Restore tab state
                     allTabIds.forEach(id => {

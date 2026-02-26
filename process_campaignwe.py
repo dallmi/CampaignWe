@@ -22,6 +22,7 @@ Input folder: input/
 Output:
     - data/campaignwe.db                (DuckDB database)
     - output/events_raw.parquet         (all event-level data with HR fields)
+    - output/events_anon.parquet        (anonymized: no GPN or email columns)
     - output/events_daily.parquet       (aggregated by day)
     - output/events_story.parquet       (story engagement by day, division, region)
 
@@ -685,6 +686,28 @@ def export_parquet_files(con, output_dir):
     raw_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{raw_file}')").df()['n'][0]
     raw_size = os.path.getsize(raw_file) / (1024 * 1024)
     log(f"  events_raw.parquet ({raw_count:,} rows, {raw_size:.1f} MB)")
+
+    # Anonymized data export (strip PII columns)
+    anon_file = output_dir / 'events_anon.parquet'
+    if anon_file.exists():
+        anon_file.unlink()
+
+    # Determine which PII columns exist in the events table to exclude
+    events_schema = con.execute("DESCRIBE events").df()
+    all_cols = events_schema['column_name'].tolist()
+    pii_columns = {'gpn', 'email', 'CP_GPN', 'CP_Email'}
+    pii_to_exclude = [c for c in all_cols if c in pii_columns]
+
+    if pii_to_exclude:
+        exclude_list = ', '.join(pii_to_exclude)
+        con.execute(f"COPY (SELECT * EXCLUDE ({exclude_list}) FROM events) TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+        log(f"  events_anon.parquet ({raw_count:,} rows, stripped: {', '.join(pii_to_exclude)})")
+    else:
+        con.execute(f"COPY events TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+        log(f"  events_anon.parquet ({raw_count:,} rows, no PII columns found to strip)")
+
+    anon_size = os.path.getsize(anon_file) / (1024 * 1024)
+    log(f"  events_anon.parquet size: {anon_size:.1f} MB")
 
     # Daily aggregation
     daily_file = output_dir / 'events_daily.parquet'
