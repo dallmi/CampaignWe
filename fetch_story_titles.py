@@ -26,9 +26,9 @@ CONFIG_PATH = SCRIPT_DIR / "config" / "sharepoint.json"
 OUTPUT_PATH = SCRIPT_DIR / "output" / "story_titles.parquet"
 TOKEN_CACHE_PATH = SCRIPT_DIR / "config" / ".token_cache.bin"
 
-# Microsoft's well-known public client ID for device-code / CLI-style flows.
-# Works in any tenant without needing your own app registration.
-WELL_KNOWN_CLIENT_ID = "04b07795-a019-4bf5-87a2-ebbab7d02895"
+# Microsoft Office public client ID — a first-party app that is allowed
+# in virtually all corporate tenants (unlike the Azure CLI client ID).
+WELL_KNOWN_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
 
 SCOPES = ["https://graph.microsoft.com/Sites.Read.All"]
 
