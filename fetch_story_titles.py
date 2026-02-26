@@ -26,9 +26,9 @@ CONFIG_PATH = SCRIPT_DIR / "config" / "sharepoint.json"
 OUTPUT_PATH = SCRIPT_DIR / "output" / "story_titles.parquet"
 TOKEN_CACHE_PATH = SCRIPT_DIR / "config" / ".token_cache.bin"
 
-# Microsoft Office public client ID — a first-party app that is allowed
-# in virtually all corporate tenants (unlike the Azure CLI client ID).
-WELL_KNOWN_CLIENT_ID = "d3590ed6-52b3-4102-aeff-aad2292ab01c"
+# Microsoft Graph PowerShell public client ID — pre-authorized for
+# Microsoft Graph API access in corporate tenants.
+WELL_KNOWN_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
 
 SCOPES = ["https://graph.microsoft.com/Sites.Read.All"]
 
