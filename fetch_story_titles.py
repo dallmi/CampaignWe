@@ -251,9 +251,6 @@ def main():
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     result.to_parquet(OUTPUT_PATH, index=False)
     print(f"\nSaved {len(result)} stories to {OUTPUT_PATH}")
-    print(result.head(10).to_string(index=False))
-    if len(result) > 10:
-        print(f"  ... and {len(result) - 10} more")
 
 
 if __name__ == "__main__":

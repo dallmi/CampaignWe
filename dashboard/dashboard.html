@@ -1655,20 +1655,14 @@
         async function renderFunnel() {
             const data = await q(`
                 SELECT
-                    CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as vp,
                     CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
-                    CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
-                    CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
-                    CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides
+                    CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
             `);
             const row = data[0] || {};
             const steps = [
-                { label: 'View Prompt', value: Number(row.vp) || 0, color: '#404040' },
-                { label: 'Read', value: Number(row.reads) || 0, color: '#5A5D5C' },
-                { label: 'Like', value: Number(row.likes) || 0, color: COLORS.success },
-                { label: 'Share', value: Number(row.shares) || 0, color: CHART_PALETTE[1] },
-                { label: 'Hide', value: Number(row.hides) || 0, color: COLORS.info }
+                { label: 'Read', value: Number(row.reads) || 0, color: '#404040' },
+                { label: 'Like', value: Number(row.likes) || 0, color: COLORS.success }
             ];
             const topVal = steps[0].value || 1;
             const container = document.getElementById('funnelContainer');
@@ -1692,21 +1686,24 @@
             const data = await q(`
                 SELECT
                     COUNT(DISTINCT CASE WHEN action_type='Open Form' THEN gpn END) as openers,
-                    COUNT(DISTINCT CASE WHEN action_type='Submit' THEN gpn END) as submitters
+                    COUNT(DISTINCT CASE WHEN action_type='Submit' THEN gpn END) as submitters,
+                    COUNT(DISTINCT CASE WHEN action_type='Cancel' THEN gpn END) as cancellers
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const row = data[0] || {};
             const openers = Number(row.openers) || 0;
             const submitters = Number(row.submitters) || 0;
+            const cancellers = Number(row.cancellers) || 0;
             const card = document.getElementById('creationFunnelCard');
             if (openers === 0 && submitters === 0) { card.style.display = 'none'; return; }
             card.style.display = '';
             const completionRate = openers > 0 ? ((submitters / openers) * 100).toFixed(1) : 0;
-            const bounceRate = openers > 0 ? (((openers - submitters) / openers) * 100).toFixed(1) : 0;
+            const cancelRate = openers > 0 ? ((cancellers / openers) * 100).toFixed(1) : 0;
             const container = document.getElementById('creationFunnelContainer');
             const steps = [
                 { label: 'Opened Form', value: openers, color: '#404040' },
-                { label: 'Submitted', value: submitters, color: COLORS.success }
+                { label: 'Submitted', value: submitters, color: COLORS.success },
+                { label: 'Cancelled', value: cancellers, color: COLORS.warning }
             ];
             const topVal = steps[0].value || 1;
             const minPct = 20;
@@ -1725,7 +1722,7 @@
             }).join('');
             html += `<div style="display:flex;justify-content:center;gap:32px;margin-top:10px;font-size:13px;color:#5A5D5C">
                 <span><strong>Completion Rate:</strong> ${completionRate}%</span>
-                <span><strong>Bounce Rate:</strong> ${bounceRate}%</span>
+                <span><strong>Cancel Rate:</strong> ${cancelRate}%</span>
             </div>`;
             container.innerHTML = html;
         }
@@ -1737,26 +1734,23 @@
                 SELECT story_id, MAX(story_title) as story_title
                        ${keysSelect},
                        COUNT(DISTINCT gpn) as unique_readers,
-                       CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as view_prompts,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
-                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
-                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
-                       CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY story_id ORDER BY reads DESC
             `);
             const headers = hasKeys
-                ? ['Story', 'Keys', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides']
-                : ['Story', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides'];
+                ? ['Story', 'Keys', 'Reads', 'Unique Readers', 'Likes']
+                : ['Story', 'Reads', 'Unique Readers', 'Likes'];
             const rightAlign = hasKeys
-                ? [false, false, true, true, true, true, true, true]
-                : [false, true, true, true, true, true, true];
-            const defaultSort = hasKeys ? 3 : 2;
+                ? [false, false, true, true, true]
+                : [false, true, true, true];
+            const defaultSort = hasKeys ? 2 : 1;
             const rows = data.map(d => hasKeys
-                ? [storyLabel(d), d.story_keys || '', Number(d.view_prompts), Number(d.reads),
-                   Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)]
-                : [storyLabel(d), Number(d.view_prompts), Number(d.reads),
-                   Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)]
+                ? [storyLabel(d), d.story_keys || '', Number(d.reads),
+                   Number(d.unique_readers), Number(d.likes)]
+                : [storyLabel(d), Number(d.reads),
+                   Number(d.unique_readers), Number(d.likes)]
             );
             tableData.storyEngagement = { headers, rows, rightAlign };
             const container = document.getElementById('storyEngagementTable');

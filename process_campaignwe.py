@@ -568,13 +568,9 @@ def add_calculated_columns(con, has_hr_history=False):
             CASE
                 WHEN r."{link_label_col}" ILIKE '%Share your story%' THEN 'Open Form'
                 WHEN r."{link_label_col}" ILIKE '%Submit%' THEN 'Submit'
-                WHEN r."{link_label_col}" ILIKE '%Read%' OR r."{link_label_col}" ILIKE '%Show More%' THEN 'Read'
-                WHEN r."{link_label_col}" ILIKE '%hide%' OR r."{link_label_col}" ILIKE '%Show Less%' THEN 'Hide'
-                WHEN r."{link_label_col}" ILIKE '%View Prompt%' THEN 'View Prompt'
+                WHEN r."{link_label_col}" ILIKE '%Cancel%' THEN 'Cancel'
+                WHEN r."{link_label_col}" ILIKE '%Read%' THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%' THEN 'Like'
-                WHEN r."{link_label_col}" ILIKE '%share%' THEN 'Share'
-                WHEN regexp_full_match(TRIM(r."{link_label_col}"), '\\d+') THEN 'Pagination'
-                WHEN r."{link_label_col}" IS NULL OR TRIM(r."{link_label_col}") = '' THEN NULL
                 ELSE 'Other'
             END as action_type,"""
     else:
