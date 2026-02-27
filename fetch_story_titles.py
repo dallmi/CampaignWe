@@ -1,10 +1,12 @@
 """
-Convert a SharePoint list export (Excel/CSV) to Parquet lookup table.
+Convert story titles CSV (from Power Automate) to Parquet lookup table.
 
-Steps:
-  1. Export the SharePoint list via "Export to Excel" in your browser
-  2. Place the .xlsx or .csv file in the input/ folder
-  3. Run this script — it reads the newest file and saves story_titles.parquet
+The CSV is automatically synced by a Power Automate flow from a SharePoint list
+into a OneDrive folder. This script reads it and saves story_titles.parquet.
+
+Input priority:
+  1. OneDrive sync folder: <OneDrive>/Projekte/CPLAN/input/story.csv
+  2. Local fallback: input/ folder (any .xlsx or .csv)
 
 Usage:
     python fetch_story_titles.py              # convert and save to output/story_titles.parquet
@@ -14,14 +16,18 @@ Prerequisites:
     pip install pandas pyarrow openpyxl
 """
 
+import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-INPUT_DIR = SCRIPT_DIR / "input"
+LOCAL_INPUT_DIR = SCRIPT_DIR / "input"
 OUTPUT_PATH = SCRIPT_DIR / "output" / "story_titles.parquet"
+
+# Relative path inside OneDrive to the Power Automate output
+ONEDRIVE_SUBPATH = Path("Projekte") / "CampaignWe" / "input" / "story.csv"
 
 # Column mapping: our_name -> SharePoint column name(s) to look for
 COLUMN_MAP = {
@@ -30,20 +36,66 @@ COLUMN_MAP = {
 }
 
 
-def find_input_file():
-    """Find the newest .xlsx or .csv file in the input/ folder."""
-    INPUT_DIR.mkdir(parents=True, exist_ok=True)
+def find_onedrive_root():
+    """Auto-detect the corporate OneDrive sync folder."""
+    if sys.platform == "win32":
+        # Windows: look in user home for "OneDrive - *" folders
+        home = Path.home()
+        candidates = sorted(home.glob("OneDrive - *"), key=lambda p: p.name)
+        if candidates:
+            return candidates[0]
+    else:
+        # macOS / Linux: look in ~/Library/CloudStorage/OneDrive-*
+        cloud = Path.home() / "Library" / "CloudStorage"
+        if cloud.exists():
+            candidates = sorted(cloud.glob("OneDrive-*"), key=lambda p: p.name)
+            # Prefer corporate over personal
+            corp = [c for c in candidates if "person" not in c.name.lower()
+                    and "persönlich" not in c.name.lower()]
+            if corp:
+                return corp[0]
+            if candidates:
+                return candidates[0]
 
-    candidates = list(INPUT_DIR.glob("*.xlsx")) + list(INPUT_DIR.glob("*.csv"))
-    # Exclude Excel temp files
+    # Also check ONEDRIVE environment variable (set by OneDrive on Windows)
+    env_path = os.environ.get("OneDriveCommercial") or os.environ.get("OneDrive")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+
+    return None
+
+
+def find_input_file():
+    """Find the story CSV: first check OneDrive, then fall back to local input/."""
+    # 1. Try OneDrive path
+    onedrive_root = find_onedrive_root()
+    if onedrive_root:
+        onedrive_file = onedrive_root / ONEDRIVE_SUBPATH
+        if onedrive_file.exists():
+            print(f"  OneDrive root: {onedrive_root}")
+            return onedrive_file
+        else:
+            print(f"  OneDrive found at {onedrive_root} but story.csv not at expected path:")
+            print(f"    {onedrive_file}")
+
+    # 2. Fall back to local input/ folder
+    LOCAL_INPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    candidates = list(LOCAL_INPUT_DIR.glob("*.xlsx")) + list(LOCAL_INPUT_DIR.glob("*.csv"))
     candidates = [f for f in candidates if not f.name.startswith("~$")]
 
     if not candidates:
-        print(f"ERROR: No .xlsx or .csv files found in {INPUT_DIR}/")
-        print(f"       Export the SharePoint list and place the file there.")
+        print(f"ERROR: Could not find story data.")
+        print(f"  Checked OneDrive: {onedrive_root / ONEDRIVE_SUBPATH if onedrive_root else '(not found)'}")
+        print(f"  Checked local:    {LOCAL_INPUT_DIR}/ (no .xlsx or .csv files)")
+        print(f"\n  Ensure the Power Automate flow is syncing story.csv to OneDrive,")
+        print(f"  or manually place a file in {LOCAL_INPUT_DIR}/")
         sys.exit(1)
 
     newest = max(candidates, key=lambda f: f.stat().st_mtime)
+    print(f"  (Using local fallback: {LOCAL_INPUT_DIR}/)")
     return newest
 
 
@@ -69,7 +121,7 @@ def main():
 
     print("Looking for input file...")
     input_file = find_input_file()
-    print(f"  Found: {input_file.name}")
+    print(f"  Found: {input_file}")
 
     print("Reading file...")
     df = read_file(input_file)
