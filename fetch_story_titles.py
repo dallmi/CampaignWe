@@ -31,7 +31,7 @@ ONEDRIVE_SUBPATH = Path("Projekte") / "CampaignWe" / "input" / "story.csv"
 
 # Column mapping: our_name -> SharePoint column name(s) to look for
 COLUMN_MAP = {
-    "story_id": ["StoryID", "Story ID", "storyid", "story_id"],
+    "story_id": ["StoryID", "Story ID", "storyid", "story_id", "ID"],
     "story_title": ["Title", "Story Title", "title", "story_title"],
 }
 
