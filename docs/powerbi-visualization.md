@@ -28,19 +28,16 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 
 | File | Grain | Typical Size |
 |------|-------|-------------|
-| `events_raw.parquet` | One row per click event | Primary source for most visuals |
-| `events_story.parquet` | One row per (story, date, division, region) | Pre-aggregated story metrics |
+| `events_raw.parquet` | One row per click event | Primary source for all visuals |
 
 ### Import Steps
 
 1. **Get Data → Parquet**
    - Home → Get Data → More → Parquet
    - Browse to `output/events_raw.parquet` → Load
-   - Repeat for `events_story.parquet`
 
 2. **Rename tables** in the Model view:
    - `events_raw` → **Events**
-   - `events_story` → **StoryDaily**
 
 3. **Check column types** in Power Query Editor (Transform Data):
    - `session_date` / `date` → **Date**
@@ -54,9 +51,7 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 
 ### Recommended: Use events_raw as Primary
 
-Most dashboard visuals run against event-level data. The pre-aggregated `events_story` table is useful for performance optimization on large datasets but is not strictly required — every metric can be computed from `events_raw`.
-
-**If the dataset is small enough** (< 500K rows), you can build the entire report from `events_raw` alone.
+All dashboard visuals run against event-level data from `events_raw`. No pre-aggregated tables are needed.
 
 ---
 
@@ -94,7 +89,6 @@ Rename the column to `Hour`.
 | From | To | Cardinality | Key |
 |------|----|-------------|-----|
 | Events[session_date] | DateTable[Date] | Many-to-One | Active |
-| StoryDaily[date] | DateTable[Date] | Many-to-One | Inactive |
 | Events[event_hour] | HourTable[Hour] | Many-to-One | Active |
 
 Set cross-filter direction to **Single** for all relationships.
@@ -1114,7 +1108,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 
 ## Quick-Start Checklist
 
-1. [ ] Import `events_raw.parquet` → rename table to **Events** (optionally `events_story.parquet` → **StoryDaily**)
+1. [ ] Import `events_raw.parquet` → rename table to **Events**
 2. [ ] Create **DateTable**, **HourTable**, **CoverageCategory**, **FieldList** DAX tables
 3. [ ] Set up relationships (Events → DateTable, Events → HourTable)
 4. [ ] Create `_Measures` table and paste all DAX measures

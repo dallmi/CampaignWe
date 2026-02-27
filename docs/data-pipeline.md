@@ -17,7 +17,7 @@ Application Insights (KQL)
         |
         +---> data/campaignwe.db           (DuckDB database)
         +---> output/events_raw.parquet    (all events with HR fields)
-        +---> output/events_story.parquet  (story engagement by day/division/region)
+        +---> output/events_anonymized.parquet   (anonymized: GPNs hashed, emails dropped)
         |
         v
   dashboard/dashboard.html     <-- loads Parquet via DuckDB WASM
@@ -246,7 +246,7 @@ This is the average number of story-open clicks per unique person within a given
 | File | Contents | Grain |
 |------|----------|-------|
 | `events_raw.parquet` | All events with all calculated + HR columns | One row per event |
-| `events_story.parquet` | Story engagement by day, division, region | One row per story/day/division/region |
+| `events_anonymized.parquet` | Same as above but GPNs hashed, emails dropped | One row per event |
 
 ---
 
@@ -258,7 +258,6 @@ The DuckDB database at `data/campaignwe.db` contains:
 |-------|-------------|
 | `events_raw` | Raw imported data (pre-enrichment) |
 | `events` | Final enriched table with all calculated columns |
-| `events_story` | Story-level aggregation table |
 | `hr_history` | HR organisational data (loaded each run) |
 | `processed_files` | File processing manifest for delta tracking |
 

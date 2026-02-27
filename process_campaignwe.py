@@ -22,8 +22,7 @@ Input folder: input/
 Output:
     - data/campaignwe.db                (DuckDB database)
     - output/events_raw.parquet         (all event-level data with HR fields)
-    - output/events_anon.parquet        (anonymized: GPNs hashed, emails dropped)
-    - output/events_story.parquet       (story engagement by day, division, region)
+    - output/events_anonymized.parquet        (anonymized: GPNs hashed, emails dropped)
 
 Primary Key: timestamp + user_id + session_id + name
     On conflict, the latest file's data takes precedence.
@@ -574,7 +573,7 @@ def add_calculated_columns(con, has_hr_history=False):
         log(f"  Link label column: {link_label_col}")
         story_sql = f"""
             -- Story parsing from {link_label_col}
-            -- Format: "<story_id><Action>" e.g. "15Like", "15Read full story", "15View Prompt"
+            -- Format: "<story_id><Action>" e.g. "15Like", "15Read full story"
             NULLIF(regexp_extract(r."{link_label_col}", '^(\\d+)', 1), '') as story_id,
             CASE
                 WHEN r."{link_label_col}" ILIKE '%Share your story%' THEN 'Open Form'
@@ -697,9 +696,9 @@ def export_parquet_files(con, output_dir):
     log(f"  events_raw.parquet ({raw_count:,} rows, {raw_size:.1f} MB)")
 
     # Anonymized data export (hash GPNs, drop emails)
-    anon_file = output_dir / 'events_anon.parquet'
-    if anon_file.exists():
-        anon_file.unlink()
+    anonymized_file = output_dir / 'events_anonymized.parquet'
+    if anonymized_file.exists():
+        anonymized_file.unlink()
 
     events_schema = con.execute("DESCRIBE events").df()
     all_cols = events_schema['column_name'].tolist()
@@ -719,65 +718,17 @@ def export_parquet_files(con, output_dir):
             select_parts.append(c)
 
     select_sql = ', '.join(select_parts)
-    con.execute(f"COPY (SELECT {select_sql} FROM events) TO '{anon_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+    con.execute(f"COPY (SELECT {select_sql} FROM events) TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
 
     changes = []
     if cols_to_hash:
         changes.append(f"hashed: {', '.join(cols_to_hash)}")
     if cols_to_drop:
         changes.append(f"dropped: {', '.join(cols_to_drop)}")
-    log(f"  events_anon.parquet ({raw_count:,} rows, {'; '.join(changes) or 'no changes'})")
+    log(f"  events_anonymized.parquet ({raw_count:,} rows, {'; '.join(changes) or 'no changes'})")
 
-    anon_size = os.path.getsize(anon_file) / (1024 * 1024)
-    log(f"  events_anon.parquet size: {anon_size:.1f} MB")
-
-    # Check which HR columns exist in events table
-    events_schema = con.execute("DESCRIBE events").df()
-    events_cols = events_schema['column_name'].tolist()
-
-    # Story-level aggregation (engagement per story with HR dimensions)
-    if 'story_id' in events_cols and 'action_type' in events_cols:
-        story_file = output_dir / 'events_story.parquet'
-        if story_file.exists():
-            story_file.unlink()
-
-        hr_story_cols = []
-        if 'hr_division' in events_cols:
-            hr_story_cols.append("hr_division")
-        if 'hr_region' in events_cols:
-            hr_story_cols.append("hr_region")
-
-        hr_story_group = ', ' + ', '.join(hr_story_cols) if hr_story_cols else ''
-        hr_story_select = hr_story_group
-
-        story_title_select = ", MAX(story_title) as story_title" if 'story_title' in events_cols else ''
-        story_keys_select = ", MAX(story_keys) as story_keys" if 'story_keys' in events_cols else ''
-
-        con.execute(f"""
-            CREATE OR REPLACE TABLE events_story AS
-                SELECT
-                    story_id,
-                    session_date as date
-                    {hr_story_select},
-                    COUNT(*) as total_events,
-                    COUNT(DISTINCT gpn) as unique_users,
-                    COUNT(DISTINCT session_key) as unique_sessions,
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-                    COUNT(CASE WHEN action_type = 'Hide' THEN 1 END) as hides,
-                    COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-                    COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares,
-                    COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
-                    COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
-                    {story_title_select}
-                    {story_keys_select}
-                FROM events
-                WHERE story_id IS NOT NULL AND story_id != ''
-                GROUP BY story_id, session_date {hr_story_group}
-                ORDER BY story_id, session_date {hr_story_group}
-        """)
-        con.execute(f"COPY events_story TO '{story_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-        story_count = con.execute("SELECT COUNT(*) as n FROM events_story").df()['n'][0]
-        log(f"  events_story.parquet ({story_count:,} rows)")
+    anonymized_size = os.path.getsize(anonymized_file) / (1024 * 1024)
+    log(f"  events_anonymized.parquet size: {anonymized_size:.1f} MB")
 
 
 def print_summary(con, output_dir=None):
@@ -985,11 +936,10 @@ def print_summary(con, output_dir=None):
             SELECT
                 COUNT(DISTINCT story_id) as unique_stories,
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-                COUNT(CASE WHEN action_type = 'Hide' THEN 1 END) as hides,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-                COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares,
-                COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
-                COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
+                COUNT(CASE WHEN action_type = 'Open Form' THEN 1 END) as open_forms,
+                COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
+                COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels
             FROM events
             WHERE story_id IS NOT NULL AND story_id != ''
         """).df().iloc[0]
@@ -998,12 +948,7 @@ def print_summary(con, output_dir=None):
         log("  " + "-" * 60)
         log(f"    Unique stories:    {int(story_stats['unique_stories']):,}")
         log(f"    Reads:             {int(story_stats['reads']):,}")
-        log(f"    Hides:             {int(story_stats['hides']):,}")
         log(f"    Likes:             {int(story_stats['likes']):,}")
-        log(f"    Shares:            {int(story_stats['shares']):,}")
-        log(f"    View Prompts:      {int(story_stats['view_prompts']):,}")
-        if int(story_stats['other_actions']) > 0:
-            log(f"    Other:             {int(story_stats['other_actions']):,}")
 
         # Top stories by reads
         has_title = 'story_title' in events_cols
@@ -1014,8 +959,7 @@ def print_summary(con, output_dir=None):
                 {title_select},
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(DISTINCT gpn) as unique_readers,
-                COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-                COUNT(CASE WHEN action_type = 'Share' THEN 1 END) as shares
+                COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
             FROM events
             WHERE story_id IS NOT NULL AND story_id != ''
             GROUP BY story_id
@@ -1026,14 +970,14 @@ def print_summary(con, output_dir=None):
         if len(top_stories) > 0:
             log("\n    Top stories by reads:")
             if has_title:
-                log(f"    {'Story ID':<12s} {'Title':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
+                log(f"    {'Story ID':<12s} {'Title':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
                 for _, row in top_stories.iterrows():
                     title = str(row['story_title'] or '')[:28]
-                    log(f"    {str(row['story_id']):<12s} {title:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
+                    log(f"    {str(row['story_id']):<12s} {title:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
             else:
-                log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s} {'Shares':>8s}")
+                log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
                 for _, row in top_stories.iterrows():
-                    log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,} {int(row['shares']):>8,}")
+                    log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
 
     log("\n" + "=" * 64)
 

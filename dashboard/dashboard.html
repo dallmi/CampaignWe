@@ -810,8 +810,6 @@
             }
 
             await load('events', 'events_raw.parquet', 'Loaded events...');
-            // events_story is optional — used for pre-aggregated story data
-            try { await load('story_agg', 'events_story.parquet', 'Loaded story data...'); } catch(e) { /* optional */ }
         }
 
         // =====================================================================
@@ -1547,13 +1545,12 @@
                        ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
                        COUNT(DISTINCT story_id) as stories,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
-                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
-                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY events DESC
             `);
-            const headers = ['Division','Clicks','Users','Clicks/User','Stories','Reads','Likes','Shares'];
-            const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes), Number(d.shares)]);
-            const rightAlign = [false,true,true,true,true,true,true,true];
+            const headers = ['Division','Clicks','Users','Clicks/User','Stories','Reads','Likes'];
+            const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes)]);
+            const rightAlign = [false,true,true,true,true,true,true];
             tableData.divDepth = { headers, rows, rightAlign };
             document.getElementById('divDepthTable').innerHTML = renderHTMLTable(headers, rows, rightAlign);
         }
@@ -1622,8 +1619,7 @@
                        CAST(COUNT(*) AS INTEGER) as total_events,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
                        COUNT(DISTINCT gpn) as unique_readers,
-                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
-                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM exploded
                 WHERE key_value != ''
                 GROUP BY key_value ORDER BY reads DESC
