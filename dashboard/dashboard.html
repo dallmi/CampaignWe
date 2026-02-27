@@ -1027,6 +1027,8 @@
                     datasets.forEach((ds, di) => {
                         const meta = chart.getDatasetMeta(di);
                         meta.data.forEach((bar, i) => {
+                            const val = ds.values[i];
+                            if (!val) return;
                             if (horizontal) {
                                 const barLeft = chart.scales.x.getPixelForValue(0);
                                 const barWidth = bar.x - barLeft;
@@ -1042,9 +1044,26 @@
                                 c.textBaseline = 'middle';
                                 c.textAlign = 'left';
                                 const outsideLabel = barWidth > 50
-                                    ? formatNumber(ds.values[i])
-                                    : `${formatNumber(ds.values[i])} (${ds.pcts[i]}%)`;
+                                    ? formatNumber(val)
+                                    : `${formatNumber(val)} (${ds.pcts[i]}%)`;
                                 c.fillText(outsideLabel, bar.x + 4, bar.y);
+                            } else {
+                                const barTop = bar.y;
+                                const barBottom = chart.scales.y.getPixelForValue(0);
+                                const barHeight = barBottom - barTop;
+                                c.font = '10px -apple-system, sans-serif';
+                                c.textAlign = 'center';
+                                c.textBaseline = 'bottom';
+                                if (barHeight > 25) {
+                                    c.fillStyle = '#5A5D5C';
+                                    c.fillText(formatNumber(val), bar.x, barTop - 4);
+                                    c.fillStyle = '#fff';
+                                    c.textBaseline = 'top';
+                                    c.fillText(`${ds.pcts[i]}%`, bar.x, barTop + 4);
+                                } else if (barHeight > 0) {
+                                    c.fillStyle = '#5A5D5C';
+                                    c.fillText(`${formatNumber(val)} (${ds.pcts[i]}%)`, bar.x, barTop - 4);
+                                }
                             }
                         });
                     });
@@ -1539,13 +1558,16 @@
             destroyChart('storyReads');
             charts.storyReads = new Chart(document.getElementById('chartStoryReads').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: data.map((_, i) => CHART_PALETTE[i % CHART_PALETTE.length]), borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     layout: { padding: { right: 80 } },
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
                     scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } } },
                 plugins: [barLabelPlugin(values, pcts, { horizontal: true })]
             });
+            // Store story_id -> color mapping for consistent colors across charts
+            window._storyColorMap = {};
+            data.forEach((d, i) => { window._storyColorMap[d.story_id] = CHART_PALETTE[i % CHART_PALETTE.length]; });
         }
 
         async function renderStoryReaders() {
@@ -1556,10 +1578,11 @@
             `);
             const values = data.map(d => Number(d.readers));
             const pcts = pctArray(values);
+            const colors = data.map((d, i) => (window._storyColorMap && window._storyColorMap[d.story_id]) || CHART_PALETTE[i % CHART_PALETTE.length]);
             destroyChart('storyReaders');
             charts.storyReaders = new Chart(document.getElementById('chartStoryReaders').getContext('2d'), {
                 type: 'bar',
-                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
+                data: { labels: data.map(d => storyLabel(d)), datasets: [{ data: values, backgroundColor: colors, borderRadius: 2 }] },
                 options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
                     layout: { padding: { right: 80 } },
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${pcts[ctx.dataIndex]}%)` } } },
@@ -1589,13 +1612,18 @@
                 { key: 'vp', label: 'View Prompt', color: CHART_PALETTE[0] }
             ];
             const funnelTotals = {}; metrics.forEach(m => { funnelTotals[m.key] = data.reduce((s, d) => s + Number(d[m.key]), 0); });
+            const funnelDs = metrics.map(m => {
+                const values = data.map(d => Number(d[m.key]));
+                return { values, pcts: pctArray(values) };
+            });
             charts.funnel = new Chart(document.getElementById('chartFunnel').getContext('2d'), {
                 type: 'bar',
                 data: { labels, datasets: metrics.map(m => ({ label: m.label, data: data.map(d => Number(d[m.key])), backgroundColor: m.color, borderRadius: 2 })) },
                 options: { responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { position: 'top', labels: { boxWidth: 12 } },
                         tooltip: { callbacks: { label: ctx => { const t = funnelTotals[metrics[ctx.datasetIndex].key]; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${pct(ctx.raw, t)}%)`; } } } },
-                    scales: { y: { beginAtZero: true } } }
+                    scales: { y: { beginAtZero: true } } },
+                plugins: [groupedBarLabelPlugin(funnelDs, false)]
             });
         }
 
