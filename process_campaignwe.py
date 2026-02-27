@@ -1170,16 +1170,49 @@ def process_campaignwe(input_file=None, full_refresh=False):
     # TODO: Remove test story events once real story data appears in App Insights
     log("\n  Injecting test story events for flow validation...")
     con.execute("""
-        INSERT INTO events_raw (timestamp, user_id, session_id, name, CP_Link_label)
+        INSERT INTO events_raw (timestamp, user_id, session_id, name, CP_GPN, CP_Link_label)
         VALUES
-            ('2026-02-27 10:00:00', 'test-user-1', 'test-sess-1', 'click', 'Read story of 123'),
-            ('2026-02-27 10:01:00', 'test-user-1', 'test-sess-1', 'click', 'hide story of 123'),
-            ('2026-02-27 10:02:00', 'test-user-2', 'test-sess-2', 'click', 'Read story of 456'),
-            ('2026-02-27 10:03:00', 'test-user-2', 'test-sess-2', 'click', 'Like story of 456'),
-            ('2026-02-27 10:04:00', 'test-user-3', 'test-sess-3', 'click', 'Read story of 789'),
-            ('2026-02-27 10:05:00', 'test-user-3', 'test-sess-3', 'click', 'Share story of 789');
+            -- Story 123: 12 events across 4 users, 3 days
+            ('2026-02-24 09:15:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Read story of 123'),
+            ('2026-02-24 09:16:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'View Prompt story of 123'),
+            ('2026-02-24 09:17:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Like story of 123'),
+            ('2026-02-24 10:30:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Read story of 123'),
+            ('2026-02-24 10:31:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Share story of 123'),
+            ('2026-02-25 08:00:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'Read story of 123'),
+            ('2026-02-25 08:01:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'View Prompt story of 123'),
+            ('2026-02-25 14:20:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'Read story of 123'),
+            ('2026-02-25 14:21:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'hide story of 123'),
+            ('2026-02-26 11:00:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Read story of 123'),
+            ('2026-02-26 11:01:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Share story of 123'),
+            ('2026-02-26 16:45:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'Read story of 123'),
+            -- Story 456: 12 events across 4 users, 3 days
+            ('2026-02-24 11:00:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Read story of 456'),
+            ('2026-02-24 11:01:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'View Prompt story of 456'),
+            ('2026-02-24 11:02:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Like story of 456'),
+            ('2026-02-24 13:30:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Read story of 456'),
+            ('2026-02-24 13:31:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Share story of 456'),
+            ('2026-02-25 09:15:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Read story of 456'),
+            ('2026-02-25 09:16:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'View Prompt story of 456'),
+            ('2026-02-25 09:17:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Share story of 456'),
+            ('2026-02-26 10:00:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'Read story of 456'),
+            ('2026-02-26 10:01:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'View Prompt story of 456'),
+            ('2026-02-26 15:30:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'Read story of 456'),
+            ('2026-02-26 15:31:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'hide story of 456'),
+            -- Story 789: 12 events across 4 users, 3 days
+            ('2026-02-24 14:00:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Read story of 789'),
+            ('2026-02-24 14:01:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'View Prompt story of 789'),
+            ('2026-02-24 14:02:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Share story of 789'),
+            ('2026-02-24 15:45:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Read story of 789'),
+            ('2026-02-24 15:46:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Like story of 789'),
+            ('2026-02-25 10:30:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'Read story of 789'),
+            ('2026-02-25 10:31:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'View Prompt story of 789'),
+            ('2026-02-25 10:32:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'Share story of 789'),
+            ('2026-02-26 09:00:00', 'test-user-2', 'test-sess-15', 'click', '43397977', 'Read story of 789'),
+            ('2026-02-26 09:01:00', 'test-user-2', 'test-sess-15', 'click', '43397977', 'View Prompt story of 789'),
+            ('2026-02-26 13:00:00', 'test-user-4', 'test-sess-16', 'click', '00287943', 'Read story of 789'),
+            ('2026-02-26 13:01:00', 'test-user-4', 'test-sess-16', 'click', '00287943', 'Like story of 789');
     """)
-    log("  Added 6 test events for stories 123, 456, 789")
+    log("  Added 36 test events for stories 123, 456, 789")
 
     # Load HR history for GPN-based join
     has_hr_history = load_hr_history(con, hr_parquet_path)
