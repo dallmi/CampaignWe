@@ -1167,6 +1167,20 @@ def process_campaignwe(input_file=None, full_refresh=False):
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
 
+    # TODO: Remove test story events once real story data appears in App Insights
+    log("\n  Injecting test story events for flow validation...")
+    con.execute("""
+        INSERT INTO events_raw (timestamp, user_id, session_id, name, CP_Link_label)
+        VALUES
+            ('2026-02-27 10:00:00', 'test-user-1', 'test-sess-1', 'click', 'Read story of 123'),
+            ('2026-02-27 10:01:00', 'test-user-1', 'test-sess-1', 'click', 'hide story of 123'),
+            ('2026-02-27 10:02:00', 'test-user-2', 'test-sess-2', 'click', 'Read story of 456'),
+            ('2026-02-27 10:03:00', 'test-user-2', 'test-sess-2', 'click', 'Like story of 456'),
+            ('2026-02-27 10:04:00', 'test-user-3', 'test-sess-3', 'click', 'Read story of 789'),
+            ('2026-02-27 10:05:00', 'test-user-3', 'test-sess-3', 'click', 'Share story of 789');
+    """)
+    log("  Added 6 test events for stories 123, 456, 789")
+
     # Load HR history for GPN-based join
     has_hr_history = load_hr_history(con, hr_parquet_path)
 
