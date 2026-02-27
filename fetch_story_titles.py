@@ -100,9 +100,19 @@ def find_input_file():
 
 
 def read_file(path):
-    """Read an Excel or CSV file into a DataFrame."""
+    """Read an Excel or CSV file into a DataFrame, auto-detecting the delimiter."""
     if path.suffix.lower() == ".csv":
-        return pd.read_csv(path)
+        import csv
+        with open(path, "r", newline="", encoding="utf-8-sig") as f:
+            sample = f.read(8192)
+        sniffer = csv.Sniffer()
+        try:
+            dialect = sniffer.sniff(sample, delimiters=",;\t|")
+            sep = dialect.delimiter
+        except csv.Error:
+            sep = ","
+        print(f"  CSV delimiter: {repr(sep)}")
+        return pd.read_csv(path, sep=sep)
     else:
         return pd.read_excel(path)
 
