@@ -317,6 +317,10 @@
                         <div class="chart-title">Top Stories by Unique Readers</div>
                         <div class="chart-container xtall"><canvas id="chartStoryReaders"></canvas></div>
                     </div>
+                    <div class="chart-card full-width" id="keyEngagementCard" style="display:none">
+                        <div class="chart-title">Engagement by Key</div>
+                        <div class="chart-container tall"><canvas id="chartKeyEngagement"></canvas></div>
+                    </div>
                     <div class="chart-card full-width">
                         <div class="chart-title">Engagement Funnel</div>
                         <div id="funnelContainer" style="height:220px"></div>
@@ -580,6 +584,11 @@
             const sideRow = r;
             addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 35);
             r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 35);
+
+            if (charts.keyEngagement) {
+                r = addSectionTitle(ws, r, 'Engagement by Key');
+                r = addChartImage(wb, ws, 'keyEngagement', r, 0, 10, 20);
+            }
 
             if (tableData.storyEngagement) {
                 r = addSectionTitle(ws, r, 'Story Engagement Summary', tableData.storyEngagement.headers.length);
@@ -1126,7 +1135,7 @@
                     renderWeekdayHourly, renderActions, renderLinkTypes,
                     renderGcrsDrill, renderRegDrill,
                     renderDivDaily, renderDivDepthTable,
-                    renderStoryReads, renderStoryReaders, renderFunnel, renderStoryEngagement,
+                    renderStoryReads, renderStoryReaders, renderKeyEngagement, renderFunnel, renderStoryEngagement,
                     renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
                     renderGpnCoverage, renderGpnLength, renderUnmatchedGpns, renderFieldCoverage
                 ];
@@ -1592,6 +1601,53 @@
             });
         }
 
+        async function renderKeyEngagement() {
+            const hasKeys = (await q("DESCRIBE events")).some(d => d.column_name === 'story_keys');
+            const card = document.getElementById('keyEngagementCard');
+            if (!hasKeys) { card.style.display = 'none'; return; }
+            card.style.display = '';
+            // Unnest comma-separated keys and aggregate engagement per key
+            const data = await q(`
+                WITH exploded AS (
+                    SELECT TRIM(unnest(string_split(story_keys, ','))) as key_value,
+                           action_type, gpn
+                    FROM events
+                    WHERE ${getDateWhere()}${getFilterWhere()} AND story_keys IS NOT NULL AND story_keys != ''
+                )
+                SELECT key_value,
+                       CAST(COUNT(*) AS INTEGER) as total_events,
+                       CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
+                       COUNT(DISTINCT gpn) as unique_readers,
+                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
+                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares
+                FROM exploded
+                WHERE key_value != ''
+                GROUP BY key_value ORDER BY reads DESC
+            `);
+            if (!data.length) { card.style.display = 'none'; return; }
+            const labels = data.map(d => d.key_value);
+            const reads = data.map(d => Number(d.reads));
+            const readers = data.map(d => Number(d.unique_readers));
+            destroyChart('keyEngagement');
+            charts.keyEngagement = new Chart(document.getElementById('chartKeyEngagement').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Reads', data: reads, backgroundColor: '#E60000', borderRadius: 2 },
+                        { label: 'Unique Readers', data: readers, backgroundColor: '#B98E2C', borderRadius: 2 }
+                    ]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    layout: { padding: { right: 60 } },
+                    plugins: { legend: { position: 'top' }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${formatNumber(ctx.raw)}` } } },
+                    scales: { x: { display: false }, y: { grid: { display: false }, ticks: { font: { size: 11 } } } }
+                },
+                plugins: [barLabelPlugin(reads, pctArray(reads), { horizontal: true })]
+            });
+        }
+
         async function renderFunnel() {
             const data = await q(`
                 SELECT
@@ -1629,8 +1685,11 @@
         }
 
         async function renderStoryEngagement() {
+            const hasKeys = (await q("DESCRIBE events")).some(d => d.column_name === 'story_keys');
+            const keysSelect = hasKeys ? ", MAX(story_keys) as story_keys" : "";
             const data = await q(`
-                SELECT story_id, MAX(story_title) as story_title,
+                SELECT story_id, MAX(story_title) as story_title
+                       ${keysSelect},
                        COUNT(DISTINCT gpn) as unique_readers,
                        CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as view_prompts,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
@@ -1640,15 +1699,22 @@
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY story_id ORDER BY reads DESC
             `);
-            const headers = ['Story', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides'];
-            const rightAlign = [false, true, true, true, true, true, true];
-            const rows = data.map(d => [
-                storyLabel(d), Number(d.view_prompts), Number(d.reads),
-                Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)
-            ]);
+            const headers = hasKeys
+                ? ['Story', 'Keys', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides']
+                : ['Story', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides'];
+            const rightAlign = hasKeys
+                ? [false, false, true, true, true, true, true, true]
+                : [false, true, true, true, true, true, true];
+            const defaultSort = hasKeys ? 3 : 2;
+            const rows = data.map(d => hasKeys
+                ? [storyLabel(d), d.story_keys || '', Number(d.view_prompts), Number(d.reads),
+                   Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)]
+                : [storyLabel(d), Number(d.view_prompts), Number(d.reads),
+                   Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)]
+            );
             tableData.storyEngagement = { headers, rows, rightAlign };
             const container = document.getElementById('storyEngagementTable');
-            container.innerHTML = renderSortableTable(headers, rows, rightAlign, 'storyEngagement', 2, 'desc');
+            container.innerHTML = renderSortableTable(headers, rows, rightAlign, 'storyEngagement', defaultSort, 'desc');
         }
 
         function renderSortableTable(headers, rows, rightAlign, tableId, defaultSortCol, defaultSortDir) {

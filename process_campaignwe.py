@@ -782,6 +782,7 @@ def export_parquet_files(con, output_dir):
         hr_story_select = hr_story_group
 
         story_title_select = ", MAX(story_title) as story_title" if 'story_title' in events_cols else ''
+        story_keys_select = ", MAX(story_keys) as story_keys" if 'story_keys' in events_cols else ''
 
         con.execute(f"""
             CREATE OR REPLACE TABLE events_story AS
@@ -799,6 +800,7 @@ def export_parquet_files(con, output_dir):
                     COUNT(CASE WHEN action_type = 'View Prompt' THEN 1 END) as view_prompts,
                     COUNT(CASE WHEN action_type = 'Other' THEN 1 END) as other_actions
                     {story_title_select}
+                    {story_keys_select}
                 FROM events
                 WHERE story_id IS NOT NULL AND story_id != ''
                 GROUP BY story_id, session_date {hr_story_group}
@@ -1085,7 +1087,7 @@ def process_campaignwe(input_file=None, full_refresh=False):
     hr_parquet_path = script_dir.parent / 'SearchAnalytics' / 'output' / 'hr_history.parquet'
 
     # Story titles from SharePoint
-    story_titles_path = output_dir / 'story_titles.parquet'
+    story_titles_path = output_dir / 'story_metadata.parquet'
 
     # Create directories
     input_dir.mkdir(parents=True, exist_ok=True)
@@ -1167,63 +1169,63 @@ def process_campaignwe(input_file=None, full_refresh=False):
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
 
-    # TODO: Remove test story events once real story data appears in App Insights
-    # Funnel shape: View Prompt (20) > Read (14) > Like (6) > Share (4) > Hide (2)
-    log("\n  Injecting test story events for flow validation...")
-    con.execute("""
-        INSERT INTO events_raw (timestamp, user_id, session_id, name, CP_GPN, CP_Link_label)
-        VALUES
-            -- Story 123 (most popular): 8 VP, 6 Read, 3 Like, 2 Share, 1 Hide = 20 events
-            ('2026-02-24 09:10:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'View Prompt story of 123'),
-            ('2026-02-24 09:11:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Read story of 123'),
-            ('2026-02-24 09:12:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Like story of 123'),
-            ('2026-02-24 10:30:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'View Prompt story of 123'),
-            ('2026-02-24 10:31:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Read story of 123'),
-            ('2026-02-24 10:32:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Share story of 123'),
-            ('2026-02-25 08:00:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'View Prompt story of 123'),
-            ('2026-02-25 08:01:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'Read story of 123'),
-            ('2026-02-25 08:02:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'Like story of 123'),
-            ('2026-02-25 14:20:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'View Prompt story of 123'),
-            ('2026-02-25 14:21:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'Read story of 123'),
-            ('2026-02-25 14:22:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'Like story of 123'),
-            ('2026-02-26 11:00:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'View Prompt story of 123'),
-            ('2026-02-26 11:01:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Read story of 123'),
-            ('2026-02-26 11:02:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Share story of 123'),
-            ('2026-02-26 16:45:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'View Prompt story of 123'),
-            ('2026-02-26 16:46:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'Read story of 123'),
-            ('2026-02-26 16:47:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'hide story of 123'),
-            ('2026-02-24 17:00:00', 'test-user-4', 'test-sess-17', 'click', '00287943', 'View Prompt story of 123'),
-            ('2026-02-25 17:00:00', 'test-user-2', 'test-sess-18', 'click', '43397977', 'View Prompt story of 123'),
-            -- Story 456 (medium): 7 VP, 5 Read, 2 Like, 1 Share, 1 Hide = 16 events
-            ('2026-02-24 11:00:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'View Prompt story of 456'),
-            ('2026-02-24 11:01:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Read story of 456'),
-            ('2026-02-24 11:02:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Like story of 456'),
-            ('2026-02-24 13:30:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'View Prompt story of 456'),
-            ('2026-02-24 13:31:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Read story of 456'),
-            ('2026-02-24 13:32:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Share story of 456'),
-            ('2026-02-25 09:15:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'View Prompt story of 456'),
-            ('2026-02-25 09:16:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Read story of 456'),
-            ('2026-02-25 09:17:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Like story of 456'),
-            ('2026-02-26 10:00:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'View Prompt story of 456'),
-            ('2026-02-26 10:01:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'Read story of 456'),
-            ('2026-02-26 15:30:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'View Prompt story of 456'),
-            ('2026-02-26 15:31:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'Read story of 456'),
-            ('2026-02-26 15:32:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'hide story of 456'),
-            ('2026-02-25 16:00:00', 'test-user-3', 'test-sess-19', 'click', '43272388', 'View Prompt story of 456'),
-            ('2026-02-26 17:00:00', 'test-user-4', 'test-sess-20', 'click', '00287943', 'View Prompt story of 456'),
-            -- Story 789 (niche): 5 VP, 3 Read, 1 Like, 1 Share, 0 Hide = 10 events
-            ('2026-02-24 14:00:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'View Prompt story of 789'),
-            ('2026-02-24 14:01:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Read story of 789'),
-            ('2026-02-24 14:02:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Share story of 789'),
-            ('2026-02-24 15:45:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'View Prompt story of 789'),
-            ('2026-02-24 15:46:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Read story of 789'),
-            ('2026-02-24 15:47:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Like story of 789'),
-            ('2026-02-25 10:30:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'View Prompt story of 789'),
-            ('2026-02-25 10:31:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'Read story of 789'),
-            ('2026-02-26 09:00:00', 'test-user-2', 'test-sess-15', 'click', '43397977', 'View Prompt story of 789'),
-            ('2026-02-26 13:00:00', 'test-user-4', 'test-sess-16', 'click', '00287943', 'View Prompt story of 789');
-    """)
-    log("  Added 46 test events for stories 123, 456, 789")
+    # # TEST DATA — uncomment to inject sample story events for flow validation
+    # # Funnel shape: View Prompt (20) > Read (14) > Like (6) > Share (4) > Hide (2)
+    # log("\n  Injecting test story events for flow validation...")
+    # con.execute("""
+    #     INSERT INTO events_raw (timestamp, user_id, session_id, name, CP_GPN, CP_Link_label)
+    #     VALUES
+    #         -- Story 123 (most popular): 8 VP, 6 Read, 3 Like, 2 Share, 1 Hide = 20 events
+    #         ('2026-02-24 09:10:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'View Prompt story of 123'),
+    #         ('2026-02-24 09:11:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Read story of 123'),
+    #         ('2026-02-24 09:12:00', 'test-user-1', 'test-sess-01', 'click', '00294573', 'Like story of 123'),
+    #         ('2026-02-24 10:30:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'View Prompt story of 123'),
+    #         ('2026-02-24 10:31:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Read story of 123'),
+    #         ('2026-02-24 10:32:00', 'test-user-2', 'test-sess-02', 'click', '43397977', 'Share story of 123'),
+    #         ('2026-02-25 08:00:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'View Prompt story of 123'),
+    #         ('2026-02-25 08:01:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'Read story of 123'),
+    #         ('2026-02-25 08:02:00', 'test-user-3', 'test-sess-03', 'click', '43272388', 'Like story of 123'),
+    #         ('2026-02-25 14:20:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'View Prompt story of 123'),
+    #         ('2026-02-25 14:21:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'Read story of 123'),
+    #         ('2026-02-25 14:22:00', 'test-user-4', 'test-sess-04', 'click', '00287943', 'Like story of 123'),
+    #         ('2026-02-26 11:00:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'View Prompt story of 123'),
+    #         ('2026-02-26 11:01:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Read story of 123'),
+    #         ('2026-02-26 11:02:00', 'test-user-1', 'test-sess-05', 'click', '00294573', 'Share story of 123'),
+    #         ('2026-02-26 16:45:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'View Prompt story of 123'),
+    #         ('2026-02-26 16:46:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'Read story of 123'),
+    #         ('2026-02-26 16:47:00', 'test-user-3', 'test-sess-06', 'click', '43272388', 'hide story of 123'),
+    #         ('2026-02-24 17:00:00', 'test-user-4', 'test-sess-17', 'click', '00287943', 'View Prompt story of 123'),
+    #         ('2026-02-25 17:00:00', 'test-user-2', 'test-sess-18', 'click', '43397977', 'View Prompt story of 123'),
+    #         -- Story 456 (medium): 7 VP, 5 Read, 2 Like, 1 Share, 1 Hide = 16 events
+    #         ('2026-02-24 11:00:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'View Prompt story of 456'),
+    #         ('2026-02-24 11:01:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Read story of 456'),
+    #         ('2026-02-24 11:02:00', 'test-user-2', 'test-sess-07', 'click', '43397977', 'Like story of 456'),
+    #         ('2026-02-24 13:30:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'View Prompt story of 456'),
+    #         ('2026-02-24 13:31:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Read story of 456'),
+    #         ('2026-02-24 13:32:00', 'test-user-4', 'test-sess-08', 'click', '00287943', 'Share story of 456'),
+    #         ('2026-02-25 09:15:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'View Prompt story of 456'),
+    #         ('2026-02-25 09:16:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Read story of 456'),
+    #         ('2026-02-25 09:17:00', 'test-user-1', 'test-sess-09', 'click', '00294573', 'Like story of 456'),
+    #         ('2026-02-26 10:00:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'View Prompt story of 456'),
+    #         ('2026-02-26 10:01:00', 'test-user-3', 'test-sess-10', 'click', '43272388', 'Read story of 456'),
+    #         ('2026-02-26 15:30:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'View Prompt story of 456'),
+    #         ('2026-02-26 15:31:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'Read story of 456'),
+    #         ('2026-02-26 15:32:00', 'test-user-2', 'test-sess-11', 'click', '43397977', 'hide story of 456'),
+    #         ('2026-02-25 16:00:00', 'test-user-3', 'test-sess-19', 'click', '43272388', 'View Prompt story of 456'),
+    #         ('2026-02-26 17:00:00', 'test-user-4', 'test-sess-20', 'click', '00287943', 'View Prompt story of 456'),
+    #         -- Story 789 (niche): 5 VP, 3 Read, 1 Like, 1 Share, 0 Hide = 10 events
+    #         ('2026-02-24 14:00:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'View Prompt story of 789'),
+    #         ('2026-02-24 14:01:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Read story of 789'),
+    #         ('2026-02-24 14:02:00', 'test-user-3', 'test-sess-12', 'click', '43272388', 'Share story of 789'),
+    #         ('2026-02-24 15:45:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'View Prompt story of 789'),
+    #         ('2026-02-24 15:46:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Read story of 789'),
+    #         ('2026-02-24 15:47:00', 'test-user-1', 'test-sess-13', 'click', '00294573', 'Like story of 789'),
+    #         ('2026-02-25 10:30:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'View Prompt story of 789'),
+    #         ('2026-02-25 10:31:00', 'test-user-4', 'test-sess-14', 'click', '00287943', 'Read story of 789'),
+    #         ('2026-02-26 09:00:00', 'test-user-2', 'test-sess-15', 'click', '43397977', 'View Prompt story of 789'),
+    #         ('2026-02-26 13:00:00', 'test-user-4', 'test-sess-16', 'click', '00287943', 'View Prompt story of 789');
+    # """)
+    # log("  Added 46 test events for stories 123, 456, 789")
 
     # Load HR history for GPN-based join
     has_hr_history = load_hr_history(con, hr_parquet_path)
@@ -1231,14 +1233,24 @@ def process_campaignwe(input_file=None, full_refresh=False):
     # Add calculated columns (with HR join if available)
     add_calculated_columns(con, has_hr_history=has_hr_history)
 
-    # Load story titles for story_id -> story_title lookup
+    # Load story metadata for story_id -> story_title + keys lookup
     has_story_titles = load_story_titles(con, story_titles_path)
     if has_story_titles:
+        # Check which columns are available in story_titles
+        st_cols = [r[0] for r in con.execute("DESCRIBE story_titles").fetchall()]
+        has_keys = 'keys' in st_cols
+
         con.execute("""
             ALTER TABLE events ADD COLUMN IF NOT EXISTS story_title VARCHAR;
             UPDATE events SET story_title = st.story_title
             FROM story_titles st WHERE events.story_id = st.story_id;
         """)
+        if has_keys:
+            con.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS story_keys VARCHAR;
+                UPDATE events SET story_keys = st.keys
+                FROM story_titles st WHERE events.story_id = st.story_id;
+            """)
         matched = con.execute("""
             SELECT COUNT(DISTINCT story_id) FROM events
             WHERE story_id IS NOT NULL AND story_title IS NOT NULL
@@ -1247,7 +1259,8 @@ def process_campaignwe(input_file=None, full_refresh=False):
             SELECT COUNT(DISTINCT story_id) FROM events
             WHERE story_id IS NOT NULL
         """).fetchone()[0]
-        log(f"  Matched {matched}/{total} story IDs to titles")
+        log(f"  Matched {matched}/{total} story IDs to titles" +
+            (" (with keys)" if has_keys else ""))
 
     # Export Parquet files
     export_parquet_files(con, output_dir)

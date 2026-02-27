@@ -1,21 +1,23 @@
 """
-Convert story titles CSV (from Power Automate) to Parquet lookup table.
+Convert story list CSV (from Power Automate) to Parquet lookup table.
 
 The CSV is automatically synced by a Power Automate flow from a SharePoint list
-into a OneDrive folder. This script reads it and saves story_titles.parquet.
+into a OneDrive folder. This script reads it, filters active stories (Status#Id = 1),
+and saves story_metadata.parquet with ID, title, and metadata columns.
 
 Input priority:
-  1. OneDrive sync folder: <OneDrive>/Projekte/CPLAN/input/story.csv
+  1. OneDrive sync folder: <OneDrive>/Projekte/CampaignWe/input/We Are *.csv
   2. Local fallback: input/ folder (any .xlsx or .csv)
 
 Usage:
-    python fetch_story_titles.py              # convert and save to output/story_titles.parquet
+    python fetch_story_titles.py              # convert and save to output/story_metadata.parquet
     python fetch_story_titles.py --preview    # read and print without saving
 
 Prerequisites:
     pip install pandas pyarrow openpyxl
 """
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -24,16 +26,34 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_INPUT_DIR = SCRIPT_DIR / "input"
-OUTPUT_PATH = SCRIPT_DIR / "output" / "story_titles.parquet"
+OUTPUT_PATH = SCRIPT_DIR / "output" / "story_metadata.parquet"
 
-# Relative path inside OneDrive to the Power Automate output
-ONEDRIVE_SUBPATH = Path("Projekte") / "CampaignWe" / "input" / "story.csv"
+# Relative path inside OneDrive to the Power Automate output folder
+ONEDRIVE_INPUT_DIR = Path("Projekte") / "CampaignWe" / "input"
+ONEDRIVE_FILE_PATTERN = "We Are *.csv"
 
-# Column mapping: our_name -> SharePoint column name(s) to look for
+# Column mapping: our_name -> SharePoint column name(s) to look for (case-insensitive)
 COLUMN_MAP = {
-    "story_id": ["StoryID", "Story ID", "storyid", "story_id", "ID"],
-    "story_title": ["Title", "Story Title", "title", "story_title"],
+    "story_id": ["ID", "StoryID", "Story ID", "storyid", "story_id"],
+    "story_title": ["Story", "Title", "Story Title", "title", "story_title"],
 }
+
+# Additional columns to include in the output (optional — won't fail if missing)
+EXTRA_COLUMNS = {
+    "status_id": ["Status#Id", "StatusId", "Status_Id", "status#id"],
+    "keys": ["*Keys"],  # suffix match — the only column ending in "Keys"
+    "email": ["Email", "E-Mail", "email"],
+    "division": ["Division", "division"],
+    "region": ["Region", "region"],
+    "department": ["Department", "department"],
+    "job_title": ["JobTitle", "Job Title", "jobtitle", "job_title"],
+    "created": ["Created", "created"],
+    "modified": ["Modified", "modified"],
+}
+
+# Only include rows where this column equals the given value
+FILTER_COLUMN = "status_id"  # references our_name in EXTRA_COLUMNS
+FILTER_VALUE = 1
 
 
 def find_onedrive_root():
@@ -71,14 +91,16 @@ def find_input_file():
     """Find the story CSV: first check OneDrive, then fall back to local input/."""
     # 1. Try OneDrive path
     onedrive_root = find_onedrive_root()
-    if onedrive_root:
-        onedrive_file = onedrive_root / ONEDRIVE_SUBPATH
-        if onedrive_file.exists():
+    onedrive_dir = onedrive_root / ONEDRIVE_INPUT_DIR if onedrive_root else None
+    if onedrive_dir and onedrive_dir.exists():
+        matches = list(onedrive_dir.glob(ONEDRIVE_FILE_PATTERN))
+        matches = [f for f in matches if not f.name.startswith("~$")]
+        if matches:
+            newest = max(matches, key=lambda f: f.stat().st_mtime)
             print(f"  OneDrive root: {onedrive_root}")
-            return onedrive_file
+            return newest
         else:
-            print(f"  OneDrive found at {onedrive_root} but story.csv not at expected path:")
-            print(f"    {onedrive_file}")
+            print(f"  OneDrive folder found at {onedrive_dir} but no '{ONEDRIVE_FILE_PATTERN}' files")
 
     # 2. Fall back to local input/ folder
     LOCAL_INPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -88,9 +110,9 @@ def find_input_file():
 
     if not candidates:
         print(f"ERROR: Could not find story data.")
-        print(f"  Checked OneDrive: {onedrive_root / ONEDRIVE_SUBPATH if onedrive_root else '(not found)'}")
+        print(f"  Checked OneDrive: {onedrive_dir or '(not found)'} for '{ONEDRIVE_FILE_PATTERN}'")
         print(f"  Checked local:    {LOCAL_INPUT_DIR}/ (no .xlsx or .csv files)")
-        print(f"\n  Ensure the Power Automate flow is syncing story.csv to OneDrive,")
+        print(f"\n  Ensure the Power Automate flow is syncing to OneDrive,")
         print(f"  or manually place a file in {LOCAL_INPUT_DIR}/")
         sys.exit(1)
 
@@ -118,11 +140,24 @@ def read_file(path):
 
 
 def resolve_column(df, candidates):
-    """Find the first matching column name from a list of candidates."""
+    """Find the first matching column name from a list of candidates.
+
+    Supports exact match (case-insensitive) and wildcard patterns:
+      "*Keys"  — matches any column ending with "Keys"
+      "Prefix*" — matches any column starting with "Prefix"
+    """
     for name in candidates:
         for col in df.columns:
-            if col.strip().lower() == name.lower():
-                return col
+            col_stripped = col.strip()
+            if name.startswith("*"):
+                if col_stripped.lower().endswith(name[1:].lower()):
+                    return col
+            elif name.endswith("*"):
+                if col_stripped.lower().startswith(name[:-1].lower()):
+                    return col
+            else:
+                if col_stripped.lower() == name.lower():
+                    return col
     return None
 
 
@@ -137,7 +172,7 @@ def main():
     df = read_file(input_file)
     print(f"  Read {len(df)} rows, columns: {list(df.columns)}")
 
-    # Map columns
+    # Map required columns
     mapped = {}
     for our_name, candidates in COLUMN_MAP.items():
         col = resolve_column(df, candidates)
@@ -148,8 +183,56 @@ def main():
             sys.exit(1)
         mapped[our_name] = col
 
-    result = df[[mapped["story_id"], mapped["story_title"]]].copy()
-    result.columns = ["story_id", "story_title"]
+    # Map extra columns (optional — warn but don't fail if missing)
+    extra_mapped = {}
+    for our_name, candidates in EXTRA_COLUMNS.items():
+        col = resolve_column(df, candidates)
+        if col is not None:
+            extra_mapped[our_name] = col
+        else:
+            print(f"  Warning: optional column '{our_name}' not found (looked for {candidates})")
+
+    # Build result with required + extra columns
+    src_cols = [mapped["story_id"], mapped["story_title"]]
+    dst_names = ["story_id", "story_title"]
+    for our_name, src_col in extra_mapped.items():
+        src_cols.append(src_col)
+        dst_names.append(our_name)
+
+    result = df[src_cols].copy()
+    result.columns = dst_names
+
+    # Parse SharePoint JSON lookup columns
+    # These come as JSON like [{"Id":2,"Value":"Connectivity"}, ...] (array)
+    # or {"Id":2,"Value":"APAC"} (single object)
+    # Extract the "Value" field(s) into a comma-separated string
+    SP_LOOKUP_COLUMNS = ["keys", "division", "region"]
+
+    def parse_sp_lookup(val):
+        if pd.isna(val) or val == "":
+            return ""
+        try:
+            parsed = json.loads(val) if isinstance(val, str) else val
+            if isinstance(parsed, list):
+                return ", ".join(item["Value"] for item in parsed if "Value" in item)
+            elif isinstance(parsed, dict) and "Value" in parsed:
+                return parsed["Value"]
+        except (json.JSONDecodeError, TypeError, KeyError):
+            pass
+        return str(val)
+
+    for col_name in SP_LOOKUP_COLUMNS:
+        if col_name in result.columns:
+            result[col_name] = result[col_name].apply(parse_sp_lookup)
+
+    # Filter by status (only active stories)
+    if FILTER_COLUMN in result.columns:
+        before = len(result)
+        result[FILTER_COLUMN] = pd.to_numeric(result[FILTER_COLUMN], errors="coerce")
+        result = result[result[FILTER_COLUMN] == FILTER_VALUE]
+        print(f"  Filtered {FILTER_COLUMN} == {FILTER_VALUE}: {before} -> {len(result)} rows")
+    else:
+        print(f"  Warning: filter column '{FILTER_COLUMN}' not available, skipping filter")
 
     # Clean up
     result["story_id"] = result["story_id"].astype(str).str.strip()
