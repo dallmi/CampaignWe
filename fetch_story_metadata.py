@@ -10,8 +10,8 @@ Input priority:
   2. Local fallback: input/ folder (any .xlsx or .csv)
 
 Usage:
-    python fetch_story_titles.py              # convert and save to output/story_metadata.parquet
-    python fetch_story_titles.py --preview    # read and print without saving
+    python fetch_story_metadata.py              # convert and save to output/story_metadata.parquet
+    python fetch_story_metadata.py --preview    # read and print without saving
 
 Prerequisites:
     pip install pandas pyarrow openpyxl

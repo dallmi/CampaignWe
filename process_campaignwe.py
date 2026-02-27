@@ -406,7 +406,7 @@ def load_story_titles(con, story_titles_path):
     """
     if not story_titles_path.exists():
         log(f"  INFO: Story titles file not found: {story_titles_path}")
-        log(f"        Run fetch_story_titles.py to pull titles from SharePoint.")
+        log(f"        Run fetch_story_metadata.py to pull metadata from SharePoint.")
         return False
 
     con.execute("DROP TABLE IF EXISTS story_titles")
