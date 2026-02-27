@@ -222,7 +222,7 @@
                 <label>To:</label>
                 <input type="date" id="dateTo" onchange="applyCustomDate()">
             </div>
-            <button class="export-btn" onclick="exportAllTabs(event)" style="background:var(--primary);color:var(--white);border-color:var(--primary);padding:0.3rem 0.8rem;font-weight:600;cursor:pointer;">Export All XLSX</button>
+            <button class="export-btn" onclick="exportAllTabs(event)" style="padding:0.3rem 0.8rem;font-weight:600;cursor:pointer;">Export XLSX</button>
             <div class="status-indicator loading" id="statusIndicator">
                 <div class="dot"></div>
                 <span id="statusText">Loading...</span>
@@ -253,7 +253,6 @@
 
             <!-- TAB 1: Overview -->
             <div class="nav-content active" id="tabOverview">
-                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabOverview')">Export Tab XLSX</button></div>
                 <div class="kpi-grid" id="kpiGrid"></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
@@ -269,12 +268,7 @@
                         <div class="chart-container"><canvas id="chartWeekday"></canvas></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Activity Heatmap <span class="chart-subtitle">Weekday × Hour (CET)</span>
-                            <div class="export-toolbar" style="display:inline-flex;margin-left:1rem;">
-                                <button class="export-btn" onclick="exportTable('weekdayHourly', 'csv')">CSV</button>
-                                <button class="export-btn" onclick="exportTable('weekdayHourly', 'xlsx')">XLSX</button>
-                            </div>
-                        </div>
+                        <div class="chart-title">Activity Heatmap <span class="chart-subtitle">Weekday × Hour (CET)</span></div>
                         <div class="table-container" id="weekdayHourlyHeatmap"></div>
                     </div>
                     <div class="chart-card">
@@ -290,7 +284,6 @@
 
             <!-- TAB 2: Divisions & Regions -->
             <div class="nav-content" id="tabDivisions">
-                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabDivisions')">Export Tab XLSX</button></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
                         <div class="chart-title">Business Division — Clicks <span class="chart-subtitle">Click bars to drill down</span></div>
@@ -308,20 +301,13 @@
                     </div>
                 </div>
                 <div class="chart-card full-width" style="margin-top: 1rem;">
-                    <div class="chart-title">
-                        Engagement Depth by Division
-                        <div class="export-toolbar">
-                            <button class="export-btn" onclick="exportTable('divDepth', 'csv')">CSV</button>
-                            <button class="export-btn" onclick="exportTable('divDepth', 'xlsx')">XLSX</button>
-                        </div>
-                    </div>
+                    <div class="chart-title">Engagement Depth by Division</div>
                     <div class="table-container" id="divDepthTable"></div>
                 </div>
             </div>
 
             <!-- TAB 3: Stories -->
             <div class="nav-content" id="tabStories">
-                <div class="export-toolbar" style="margin-bottom:0.75rem;"><button class="export-btn" onclick="exportSingleTab(event,'tabStories')">Export Tab XLSX</button></div>
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-title">Top Stories by Reads</div>
@@ -336,33 +322,15 @@
                         <div id="funnelContainer" style="height:220px"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">
-                            Story Engagement Summary
-                            <div class="export-toolbar">
-                                <button class="export-btn" onclick="exportTable('storyEngagement', 'csv')">CSV</button>
-                                <button class="export-btn" onclick="exportTable('storyEngagement', 'xlsx')">XLSX</button>
-                            </div>
-                        </div>
+                        <div class="chart-title">Story Engagement Summary</div>
                         <div class="table-container" id="storyEngagementTable"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">
-                            Reads: Division × Story
-                            <div class="export-toolbar">
-                                <button class="export-btn" onclick="exportTable('divStoryHeatmap', 'csv')">CSV</button>
-                                <button class="export-btn" onclick="exportTable('divStoryHeatmap', 'xlsx')">XLSX</button>
-                            </div>
-                        </div>
+                        <div class="chart-title">Reads: Division × Story</div>
                         <div class="table-container" id="divStoryHeatmap"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">
-                            Reads: Region × Story
-                            <div class="export-toolbar">
-                                <button class="export-btn" onclick="exportTable('regStoryHeatmap', 'csv')">CSV</button>
-                                <button class="export-btn" onclick="exportTable('regStoryHeatmap', 'xlsx')">XLSX</button>
-                            </div>
-                        </div>
+                        <div class="chart-title">Reads: Region × Story</div>
                         <div class="table-container" id="regStoryHeatmap"></div>
                     </div>
                     <div class="chart-card full-width">
@@ -374,7 +342,6 @@
 
             <!-- TAB 4: Data Quality -->
             <div class="nav-content" id="tabQuality">
-                <div class="export-toolbar" style="margin-bottom:0.75rem;"></div>
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="chart-title">GPN → HR Mapping Coverage</div>
@@ -603,8 +570,12 @@
             addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 35);
             r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 35);
 
-            r = addSectionTitle(ws, r, 'Engagement Funnel — Top 10 Stories');
-            r = addChartImage(wb, ws, 'funnel', r, 0, 10, 20);
+            if (tableData.storyEngagement) {
+                r = addSectionTitle(ws, r, 'Story Engagement Summary', tableData.storyEngagement.headers.length);
+                r = addStyledTable(ws, r, tableData.storyEngagement.headers, tableData.storyEngagement.rows, {
+                    rightAlign: tableData.storyEngagement.rightAlign
+                });
+            }
 
             if (tableData.divStoryHeatmap) {
                 const cols = tableData.divStoryHeatmap.headers.length;
