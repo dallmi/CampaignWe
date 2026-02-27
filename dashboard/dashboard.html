@@ -332,8 +332,8 @@
                         <div class="chart-container xtall"><canvas id="chartStoryReaders"></canvas></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Engagement Funnel — Top 10 Stories</div>
-                        <div class="chart-container tall"><canvas id="chartFunnel"></canvas></div>
+                        <div class="chart-title">Engagement Funnel</div>
+                        <div class="chart-container" style="height:220px"><canvas id="chartFunnel"></canvas></div>
                     </div>
                     <div class="chart-card full-width">
                         <div class="chart-title">
@@ -1593,37 +1593,66 @@
 
         async function renderFunnel() {
             const data = await q(`
-                SELECT story_id, MAX(story_title) as story_title,
-                       CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
-                       CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides,
-                       CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
-                       CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
-                       CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as vp
+                SELECT
+                    CAST(SUM(CASE WHEN action_type='View Prompt' THEN 1 ELSE 0 END) AS INTEGER) as vp,
+                    CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
+                    CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes,
+                    CAST(SUM(CASE WHEN action_type='Share' THEN 1 ELSE 0 END) AS INTEGER) as shares,
+                    CAST(SUM(CASE WHEN action_type='Hide' THEN 1 ELSE 0 END) AS INTEGER) as hides
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
-                GROUP BY story_id ORDER BY reads DESC LIMIT 10
             `);
             destroyChart('funnel');
-            const labels = data.map(d => storyLabel(d));
-            const metrics = [
-                { key: 'reads', label: 'Read', color: '#404040' },
-                { key: 'hides', label: 'Hide', color: COLORS.info },
-                { key: 'likes', label: 'Like', color: COLORS.success },
-                { key: 'shares', label: 'Share', color: CHART_PALETTE[1] },
-                { key: 'vp', label: 'View Prompt', color: CHART_PALETTE[0] }
+            const row = data[0] || {};
+            const steps = [
+                { label: 'View Prompt', value: Number(row.vp) || 0, color: '#404040' },
+                { label: 'Read', value: Number(row.reads) || 0, color: '#5A5D5C' },
+                { label: 'Like', value: Number(row.likes) || 0, color: COLORS.success },
+                { label: 'Share', value: Number(row.shares) || 0, color: CHART_PALETTE[1] },
+                { label: 'Hide', value: Number(row.hides) || 0, color: COLORS.info }
             ];
-            const funnelTotals = {}; metrics.forEach(m => { funnelTotals[m.key] = data.reduce((s, d) => s + Number(d[m.key]), 0); });
-            const funnelDs = metrics.map(m => {
-                const values = data.map(d => Number(d[m.key]));
-                return { values, pcts: pctArray(values) };
-            });
+            const topVal = steps[0].value || 1;
+            const values = steps.map(s => s.value);
+            const convRates = steps.map((s, i) => i === 0 ? '100' : (steps[i-1].value ? pct(s.value, steps[i-1].value) : '0'));
             charts.funnel = new Chart(document.getElementById('chartFunnel').getContext('2d'), {
                 type: 'bar',
-                data: { labels, datasets: metrics.map(m => ({ label: m.label, data: data.map(d => Number(d[m.key])), backgroundColor: m.color, borderRadius: 2 })) },
-                options: { responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { position: 'top', labels: { boxWidth: 12 } },
-                        tooltip: { callbacks: { label: ctx => { const t = funnelTotals[metrics[ctx.datasetIndex].key]; return `${ctx.dataset.label}: ${formatNumber(ctx.raw)} (${pct(ctx.raw, t)}%)`; } } } },
-                    scales: { y: { beginAtZero: true } } },
-                plugins: [groupedBarLabelPlugin(funnelDs, false)]
+                data: {
+                    labels: steps.map(s => s.label),
+                    datasets: [{
+                        data: values,
+                        backgroundColor: steps.map(s => s.color),
+                        borderRadius: 2,
+                        barPercentage: 0.7
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false },
+                        tooltip: { callbacks: { label: ctx => {
+                            const i = ctx.dataIndex;
+                            return `${formatNumber(ctx.raw)} (${convRates[i]}% of ${i === 0 ? 'total' : steps[i-1].label})`;
+                        }}}
+                    },
+                    scales: {
+                        x: { display: false, max: topVal * 1.35 },
+                        y: { grid: { display: false }, ticks: { font: { size: 12, weight: 'bold' } } }
+                    }
+                },
+                plugins: [{
+                    afterDatasetsDraw(chart) {
+                        const c = chart.ctx;
+                        c.save();
+                        const meta = chart.getDatasetMeta(0);
+                        meta.data.forEach((bar, i) => {
+                            c.font = '11px -apple-system, sans-serif';
+                            c.fillStyle = '#5A5D5C';
+                            c.textBaseline = 'middle';
+                            c.textAlign = 'left';
+                            const rate = i === 0 ? '' : ` (${convRates[i]}%)`;
+                            c.fillText(`${formatNumber(values[i])}${rate}`, bar.x + 6, bar.y);
+                        });
+                        c.restore();
+                    }
+                }]
             });
         }
 
