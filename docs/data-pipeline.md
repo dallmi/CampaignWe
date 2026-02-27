@@ -17,7 +17,6 @@ Application Insights (KQL)
         |
         +---> data/campaignwe.db           (DuckDB database)
         +---> output/events_raw.parquet    (all events with HR fields)
-        +---> output/events_daily.parquet  (daily aggregations)
         +---> output/events_story.parquet  (story engagement by day/division/region)
         |
         v
@@ -221,16 +220,16 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 
 | `CP_Link_label` Pattern | `action_type` | Description |
 |--------------------------|---------------|-------------|
-| `Read story%`, `%Show More%` | **Read** | User opened/expanded a story |
-| `hide story%`, `%Show Less%` | **Hide** | User collapsed a story |
-| `View Prompt%` | **View Prompt** | User viewed a prompt detail |
+| `%Share your story%` | **Open Form** | User opened the story submission form |
+| `%Submit%` | **Submit** | User submitted a story |
+| `%Cancel%` | **Cancel** | User cancelled/closed the submission form |
+| `%Read%` | **Read** | User opened/expanded a story |
 | `%like%` | **Like** | User liked content |
-| `%share%` | **Share** | User shared content |
-| Pure digits (`\d+`) | **Pagination** | Page number click |
-| NULL or empty | NULL | No label recorded |
-| Anything else | **Other** | Unclassified click |
+| Anything else | **Other** | Unclassified click (excluded from dashboard) |
 
-The `story_id` is extracted from labels matching `"story of (\d+)"` — e.g., `"Read story of 42"` yields `story_id = 42`.
+**Other** groups clicks that add no analytical value: closing a story after reading it (`close`), editing form fields (`edit`), browsing/pagination (`See more stories`, pure digit clicks), and events with no label (`NULL`). These are retained in the data for completeness but excluded from all dashboard views.
+
+The `story_id` is extracted from the leading digits in `CP_Link_label` — e.g., `"15Read full story"` yields `story_id = 15`.
 
 #### Reads per User
 
@@ -247,7 +246,6 @@ This is the average number of story-open clicks per unique person within a given
 | File | Contents | Grain |
 |------|----------|-------|
 | `events_raw.parquet` | All events with all calculated + HR columns | One row per event |
-| `events_daily.parquet` | Daily aggregations (events, users, sessions, hour buckets) | One row per day |
 | `events_story.parquet` | Story engagement by day, division, region | One row per story/day/division/region |
 
 ---
@@ -260,7 +258,6 @@ The DuckDB database at `data/campaignwe.db` contains:
 |-------|-------------|
 | `events_raw` | Raw imported data (pre-enrichment) |
 | `events` | Final enriched table with all calculated columns |
-| `events_daily` | Daily aggregation table |
 | `events_story` | Story-level aggregation table |
 | `hr_history` | HR organisational data (loaded each run) |
 | `processed_files` | File processing manifest for delta tracking |

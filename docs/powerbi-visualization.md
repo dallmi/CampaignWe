@@ -24,12 +24,11 @@ This document explains how to recreate the CampaignWe HTML dashboard in Power BI
 
 ### Parquet Files
 
-Power BI Desktop can import parquet files natively (since the February 2023 release). All three files live in `output/`:
+Power BI Desktop can import parquet files natively (since the February 2023 release). The files live in `output/`:
 
 | File | Grain | Typical Size |
 |------|-------|-------------|
 | `events_raw.parquet` | One row per click event | Primary source for most visuals |
-| `events_daily.parquet` | One row per calendar day | Pre-aggregated daily KPIs |
 | `events_story.parquet` | One row per (story, date, division, region) | Pre-aggregated story metrics |
 
 ### Import Steps
@@ -37,11 +36,10 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 1. **Get Data → Parquet**
    - Home → Get Data → More → Parquet
    - Browse to `output/events_raw.parquet` → Load
-   - Repeat for `events_daily.parquet` and `events_story.parquet`
+   - Repeat for `events_story.parquet`
 
 2. **Rename tables** in the Model view:
    - `events_raw` → **Events**
-   - `events_daily` → **Daily**
    - `events_story` → **StoryDaily**
 
 3. **Check column types** in Power Query Editor (Transform Data):
@@ -56,9 +54,9 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 
 ### Recommended: Use events_raw as Primary
 
-Most dashboard visuals run against event-level data. The pre-aggregated tables (`events_daily`, `events_story`) are useful for performance optimization on large datasets but are not strictly required — every metric can be computed from `events_raw`.
+Most dashboard visuals run against event-level data. The pre-aggregated `events_story` table is useful for performance optimization on large datasets but is not strictly required — every metric can be computed from `events_raw`.
 
-**If the dataset is small enough** (< 500K rows), you can build the entire report from `events_raw` alone and skip the other two tables.
+**If the dataset is small enough** (< 500K rows), you can build the entire report from `events_raw` alone.
 
 ---
 
@@ -96,7 +94,6 @@ Rename the column to `Hour`.
 | From | To | Cardinality | Key |
 |------|----|-------------|-----|
 | Events[session_date] | DateTable[Date] | Many-to-One | Active |
-| Daily[date] | DateTable[Date] | Many-to-One | Inactive |
 | StoryDaily[date] | DateTable[Date] | Many-to-One | Inactive |
 | Events[event_hour] | HourTable[Hour] | Many-to-One | Active |
 
@@ -115,7 +112,7 @@ These columns already exist in `events_raw.parquet` from the Python pipeline, so
 | `event_hour` | Hour in CET (0–23) | Yes |
 | `event_weekday` | Day name (Monday–Sunday) | Yes |
 | `event_weekday_num` | ISO weekday (1=Mon, 7=Sun) | Yes |
-| `action_type` | Read, Hide, Like, Share, View Prompt, Pagination, Other | Yes |
+| `action_type` | Read, Like, Open Form, Submit, Cancel, Other | Yes |
 | `story_id` | Extracted story number | Yes |
 | `session_key` | Unique session identifier | Yes |
 | `hr_division` through `hr_function` | HR hierarchy fields | Yes |
@@ -160,15 +157,13 @@ DIVIDE(
 ```dax
 Reads = CALCULATE([Total Clicks], Events[action_type] = "Read")
 
-Hides = CALCULATE([Total Clicks], Events[action_type] = "Hide")
-
 Likes = CALCULATE([Total Clicks], Events[action_type] = "Like")
 
-Shares = CALCULATE([Total Clicks], Events[action_type] = "Share")
+Open Forms = CALCULATE([Total Clicks], Events[action_type] = "Open Form")
 
-View Prompts = CALCULATE([Total Clicks], Events[action_type] = "View Prompt")
+Submits = CALCULATE([Total Clicks], Events[action_type] = "Submit")
 
-Paginations = CALCULATE([Total Clicks], Events[action_type] = "Pagination")
+Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 ```
 
 ### Engagement Metrics
@@ -566,7 +561,6 @@ Colors will auto-assign from the 20-color theme palette.
 | Stories | `[Unique Stories]` |
 | Reads | `[Reads]` |
 | Likes | `[Likes]` |
-| Shares | `[Shares]` |
 
 **Formatting**:
 - Style preset: Alternating rows
@@ -642,17 +636,13 @@ CALCULATE(
 | Setting | Value |
 |---------|-------|
 | X-axis | Story Label |
-| Y-axis | `[Reads]`, `[Hides]`, `[Likes]`, `[Shares]`, `[View Prompts]` |
+| Y-axis | `[Reads]`, `[Likes]` |
 | Top N filter | Top 10 by `[Reads]` on story_id |
 | Legend | Measure names |
 
 Assign distinct colors from the chart palette to each measure series:
-- Reads → `#AF8626`
-- Hides → `#00759E`
-- Likes → `#879420`
-- Shares → `#4B2D58`
-- View Prompts → `#9F8865`
-- Other → `#2E476B`
+- Reads → `#404040`
+- Likes → `#6F7A1A`
 
 > **Alternative approach**: If having multiple measures on one axis is cumbersome, unpivot the action types into a single column using a DAX summary table. See the Appendix for the `StoryFunnel` table pattern.
 
@@ -957,15 +947,13 @@ DIVIDE(
 
 Reads = CALCULATE([Total Clicks], Events[action_type] = "Read")
 
-Hides = CALCULATE([Total Clicks], Events[action_type] = "Hide")
-
 Likes = CALCULATE([Total Clicks], Events[action_type] = "Like")
 
-Shares = CALCULATE([Total Clicks], Events[action_type] = "Share")
+Open Forms = CALCULATE([Total Clicks], Events[action_type] = "Open Form")
 
-View Prompts = CALCULATE([Total Clicks], Events[action_type] = "View Prompt")
+Submits = CALCULATE([Total Clicks], Events[action_type] = "Submit")
 
-Paginations = CALCULATE([Total Clicks], Events[action_type] = "Pagination")
+Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 
 
 // ═══════════════════════════════════════════
@@ -1126,7 +1114,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 
 ## Quick-Start Checklist
 
-1. [ ] Import `events_raw.parquet` → rename table to **Events**
+1. [ ] Import `events_raw.parquet` → rename table to **Events** (optionally `events_story.parquet` → **StoryDaily**)
 2. [ ] Create **DateTable**, **HourTable**, **CoverageCategory**, **FieldList** DAX tables
 3. [ ] Set up relationships (Events → DateTable, Events → HourTable)
 4. [ ] Create `_Measures` table and paste all DAX measures

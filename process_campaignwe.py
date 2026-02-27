@@ -23,11 +23,22 @@ Output:
     - data/campaignwe.db                (DuckDB database)
     - output/events_raw.parquet         (all event-level data with HR fields)
     - output/events_anon.parquet        (anonymized: GPNs hashed, emails dropped)
-    - output/events_daily.parquet       (aggregated by day)
     - output/events_story.parquet       (story engagement by day, division, region)
 
 Primary Key: timestamp + user_id + session_id + name
     On conflict, the latest file's data takes precedence.
+
+Action Type Classification (from CP_Link_label, case-insensitive):
+    - Open Form   — "%Share your story%"   (user opened the story submission form)
+    - Submit      — "%Submit%"             (user submitted a story)
+    - Cancel      — "%Cancel%"             (user cancelled/closed the submission form)
+    - Read        — "%Read%"               (user opened/expanded a story)
+    - Like        — "%like%"               (user liked content)
+    - Other       — anything else          (excluded from dashboard)
+
+    "Other" groups clicks with no analytical value: closing a story after reading
+    (close), editing form fields (edit), browsing/pagination (See more stories,
+    pure digit clicks), and events with no label (NULL).
 """
 
 import sys
@@ -720,49 +731,9 @@ def export_parquet_files(con, output_dir):
     anon_size = os.path.getsize(anon_file) / (1024 * 1024)
     log(f"  events_anon.parquet size: {anon_size:.1f} MB")
 
-    # Daily aggregation
-    daily_file = output_dir / 'events_daily.parquet'
-    if daily_file.exists():
-        daily_file.unlink()
-
     # Check which HR columns exist in events table
     events_schema = con.execute("DESCRIBE events").df()
     events_cols = events_schema['column_name'].tolist()
-
-    hr_daily_cols = []
-    if 'hr_division' in events_cols:
-        hr_daily_cols.append("COUNT(DISTINCT hr_division) as unique_divisions")
-    if 'hr_country' in events_cols:
-        hr_daily_cols.append("COUNT(DISTINCT hr_country) as unique_countries")
-    if 'hr_region' in events_cols:
-        hr_daily_cols.append("COUNT(DISTINCT hr_region) as unique_regions")
-
-    hr_daily_sql = ',\n                ' + ',\n                '.join(hr_daily_cols) if hr_daily_cols else ''
-
-    con.execute(f"""
-        CREATE OR REPLACE TABLE events_daily AS
-            SELECT
-                session_date as date,
-                COUNT(*) as total_events,
-                COUNT(DISTINCT session_key) as unique_sessions,
-                COUNT(DISTINCT user_id) as unique_users,
-                COUNT(DISTINCT gpn) as unique_gpns,
-                -- Temporal patterns
-                DAYNAME(session_date) as day_of_week,
-                ISODOW(session_date) as day_of_week_num,
-                -- Hour distribution (CET-based)
-                COUNT(CASE WHEN event_hour >= 3 AND event_hour < 9 THEN 1 END) as events_night,
-                COUNT(CASE WHEN event_hour >= 9 AND event_hour < 16 THEN 1 END) as events_morning,
-                COUNT(CASE WHEN event_hour >= 16 AND event_hour < 22 THEN 1 END) as events_afternoon,
-                COUNT(CASE WHEN event_hour >= 22 OR event_hour < 3 THEN 1 END) as events_evening
-                {hr_daily_sql}
-            FROM events
-            GROUP BY 1
-            ORDER BY 1
-    """)
-    con.execute(f"COPY events_daily TO '{daily_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-    daily_count = con.execute("SELECT COUNT(*) as n FROM events_daily").df()['n'][0]
-    log(f"  events_daily.parquet ({daily_count} days)")
 
     # Story-level aggregation (engagement per story with HR dimensions)
     if 'story_id' in events_cols and 'action_type' in events_cols:
