@@ -325,6 +325,10 @@
                         <div class="chart-title">Engagement Funnel</div>
                         <div id="funnelContainer" style="height:220px"></div>
                     </div>
+                    <div class="chart-card full-width" id="creationFunnelCard" style="display:none">
+                        <div class="chart-title">Story Creation Funnel</div>
+                        <div id="creationFunnelContainer"></div>
+                    </div>
                     <div class="chart-card full-width">
                         <div class="chart-title">Story Engagement Summary</div>
                         <div class="table-container" id="storyEngagementTable"></div>
@@ -1135,7 +1139,7 @@
                     renderWeekdayHourly, renderActions, renderLinkTypes,
                     renderGcrsDrill, renderRegDrill,
                     renderDivDaily, renderDivDepthTable,
-                    renderStoryReads, renderStoryReaders, renderKeyEngagement, renderFunnel, renderStoryEngagement,
+                    renderStoryReads, renderStoryReaders, renderKeyEngagement, renderFunnel, renderCreationFunnel, renderStoryEngagement,
                     renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
                     renderGpnCoverage, renderGpnLength, renderUnmatchedGpns, renderFieldCoverage
                 ];
@@ -1682,6 +1686,48 @@
                     <div style="width:110px;flex-shrink:0"></div>
                 </div>`;
             }).join('');
+        }
+
+        async function renderCreationFunnel() {
+            const data = await q(`
+                SELECT
+                    COUNT(DISTINCT CASE WHEN action_type='Open Form' THEN gpn END) as openers,
+                    COUNT(DISTINCT CASE WHEN action_type='Submit' THEN gpn END) as submitters
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()}
+            `);
+            const row = data[0] || {};
+            const openers = Number(row.openers) || 0;
+            const submitters = Number(row.submitters) || 0;
+            const card = document.getElementById('creationFunnelCard');
+            if (openers === 0 && submitters === 0) { card.style.display = 'none'; return; }
+            card.style.display = '';
+            const completionRate = openers > 0 ? ((submitters / openers) * 100).toFixed(1) : 0;
+            const bounceRate = openers > 0 ? (((openers - submitters) / openers) * 100).toFixed(1) : 0;
+            const container = document.getElementById('creationFunnelContainer');
+            const steps = [
+                { label: 'Opened Form', value: openers, color: '#404040' },
+                { label: 'Submitted', value: submitters, color: COLORS.success }
+            ];
+            const topVal = steps[0].value || 1;
+            const minPct = 20;
+            let html = steps.map(s => {
+                const widthPct = Math.max(minPct, (s.value / topVal) * 100);
+                const conv = ` (${pct(s.value, topVal)}%)`;
+                return `<div style="display:flex;align-items:center;justify-content:center;margin-bottom:4px">
+                    <div style="width:110px;text-align:right;padding-right:12px;font-size:12px;font-weight:600;color:#404040;flex-shrink:0">${s.label}</div>
+                    <div style="flex:1;display:flex;justify-content:center">
+                        <div style="width:${widthPct}%;background:${s.color};color:#fff;text-align:center;padding:6px 0;border-radius:3px;font-size:12px;font-weight:500;min-width:60px;transition:width 0.3s ease">
+                            ${formatNumber(s.value)} users${conv}
+                        </div>
+                    </div>
+                    <div style="width:110px;flex-shrink:0"></div>
+                </div>`;
+            }).join('');
+            html += `<div style="display:flex;justify-content:center;gap:32px;margin-top:10px;font-size:13px;color:#5A5D5C">
+                <span><strong>Completion Rate:</strong> ${completionRate}%</span>
+                <span><strong>Bounce Rate:</strong> ${bounceRate}%</span>
+            </div>`;
+            container.innerHTML = html;
         }
 
         async function renderStoryEngagement() {
