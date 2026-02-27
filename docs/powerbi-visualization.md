@@ -1,6 +1,8 @@
 # Power BI Visualization Guide
 
-This document explains how to recreate the CampaignWe HTML dashboard in Power BI Desktop using the same parquet files produced by `process_campaignwe.py`.
+This document explains how to recreate the CampaignWe HTML dashboard in Power BI Desktop using the parquet files produced by `process_campaignwe.py`.
+
+> **Data note**: The parquet files contain click data that has been pre-enriched with organisational (HR) fields during processing. The data is anonymised — no personally identifiable information is included. You do not need to perform any data matching yourself.
 
 ---
 
@@ -14,7 +16,7 @@ This document explains how to recreate the CampaignWe HTML dashboard in Power BI
 6. [Page 1 — Overview](#6-page-1--overview)
 7. [Page 2 — Divisions & Regions](#7-page-2--divisions--regions)
 8. [Page 3 — Stories](#8-page-3--stories)
-9. [Page 4 — Data Quality](#9-page-4--data-quality)
+9. [Page 4 — Data Completeness](#9-page-4--data-completeness)
 10. [Slicers & Cross-Filtering](#10-slicers--cross-filtering)
 11. [Appendix — Full DAX Reference](#11-appendix--full-dax-reference)
 
@@ -24,34 +26,30 @@ This document explains how to recreate the CampaignWe HTML dashboard in Power BI
 
 ### Parquet Files
 
-Power BI Desktop can import parquet files natively (since the February 2023 release). The files live in `output/`:
+Power BI Desktop can import parquet files natively (since the February 2023 release). The files live in the agreed SharePoint folder.
 
-| File | Grain | Typical Size |
+| File | Grain | Description |
 |------|-------|-------------|
-| `events_raw.parquet` | One row per click event | Primary source for all visuals |
+| `events_anonymized.parquet` | One row per click event | Anonymised click data with organisational fields — primary source for all visuals |
 
 ### Import Steps
 
 1. **Get Data → Parquet**
    - Home → Get Data → More → Parquet
-   - Browse to `output/events_raw.parquet` → Load
+   - Browse to `events_anonymized.parquet` → Load
 
 2. **Rename tables** in the Model view:
-   - `events_raw` → **Events**
+   - `events_anonymized` → **Events**
 
 3. **Check column types** in Power Query Editor (Transform Data):
    - `session_date` / `date` → **Date**
    - `timestamp`, `timestamp_cet` → **DateTime**
    - `event_hour`, `event_weekday_num`, `story_id` → **Whole Number**
-   - `gpn` → **Text** (preserve leading zeros)
+   - `person_hash` → **Text**
    - All `hr_*` columns → **Text**
    - All count columns → **Whole Number**
 
-> **Tip**: If Power BI auto-detects `gpn` as a number, change it to Text in Power Query to preserve the leading-zero format (e.g., `01234567`).
-
-### Recommended: Use events_raw as Primary
-
-All dashboard visuals run against event-level data from `events_raw`. No pre-aggregated tables are needed.
+All dashboard visuals run against event-level data. No pre-aggregated tables are needed.
 
 ---
 
@@ -97,11 +95,10 @@ Set cross-filter direction to **Single** for all relationships.
 
 ## 3. Calculated Columns (Power Query)
 
-These columns already exist in `events_raw.parquet` from the Python pipeline, so you should **not** need to recreate them. Verify they are present:
+These columns already exist in the parquet file from the Python pipeline, so you should **not** need to recreate them. Verify they are present:
 
 | Column | Description | Already in Parquet? |
 |--------|-------------|-------------------|
-| `gpn` | 8-digit zero-padded GPN | Yes |
 | `session_date` | CET-based date | Yes |
 | `event_hour` | Hour in CET (0–23) | Yes |
 | `event_weekday` | Day name (Monday–Sunday) | Yes |
@@ -109,8 +106,9 @@ These columns already exist in `events_raw.parquet` from the Python pipeline, so
 | `action_type` | Read, Like, Open Form, Submit, Cancel, Other | Yes |
 | `story_id` | Extracted story number | Yes |
 | `session_key` | Unique session identifier | Yes |
-| `hr_division` through `hr_function` | HR hierarchy fields | Yes |
-| `hr_region`, `hr_country` | Geography from HR | Yes |
+| `person_hash` | Anonymised user identifier (hash) | Yes |
+| `hr_division` through `hr_function` | Organisational hierarchy fields | Yes |
+| `hr_region`, `hr_country` | Geographic fields | Yes |
 
 If any column is missing, add it in Power Query (Transform Data) using M formulas equivalent to the Python logic documented in [data-pipeline.md](data-pipeline.md).
 
@@ -125,7 +123,7 @@ Create a dedicated **Measures** table (Enter Data → empty table → rename to 
 ```dax
 Total Clicks = COUNTROWS(Events)
 
-Unique Users = DISTINCTCOUNT(Events[gpn])
+Unique Users = DISTINCTCOUNT(Events[person_hash])
 
 Unique Sessions = DISTINCTCOUNT(Events[session_key])
 
@@ -138,7 +136,7 @@ DIVIDE(
     0
 )
 
-HR Coverage % =
+Org Coverage % =
 DIVIDE(
     COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_division])))),
     [Total Clicks],
@@ -178,26 +176,26 @@ DIVIDE(
 )
 ```
 
-### Data Quality Metrics
+### Data Completeness Metrics
 
 ```dax
-HR Matched Count =
+Org Matched Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[gpn])) && NOT(ISBLANK(Events[hr_division]))
+        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[hr_division]))
     )
 )
 
-GPN No HR Count =
+User No Org Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[gpn])) && ISBLANK(Events[hr_division])
+        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[hr_division])
     )
 )
 
-No GPN Count =
+No User Count =
 COUNTROWS(
-    FILTER(Events, ISBLANK(Events[gpn]))
+    FILTER(Events, ISBLANK(Events[person_hash]))
 )
 ```
 
@@ -321,7 +319,7 @@ Power BI supports a 3-stop gradient natively. Use:
 ┌─────────────────────────────────────────────────────────────────┐
 │  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
 ├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
-│  Total   │  Unique  │  Unique  │  Unique  │ Clicks / │    HR    │
+│  Total   │  Unique  │  Unique  │  Unique  │ Clicks / │   Org    │
 │  Clicks  │  Users   │ Sessions │ Stories  │  User    │ Coverage │
 ├──────────┴──────────┴──────────┴──────────┴──────────┴──────────┤
 │              Daily Activity Trend (line + area)                  │
@@ -345,7 +343,7 @@ Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 | Unique Sessions | `[Unique Sessions]` | Whole number |
 | Unique Stories | `[Unique Stories]` | Whole number |
 | Clicks/User | `[Clicks per User]` | 1 decimal |
-| HR Coverage | `[HR Coverage %]` | 1 decimal + "%" suffix |
+| Org Coverage | `[Org Coverage %]` | 1 decimal + "%" suffix |
 
 **Formatting**: Background = `#ECEBE4`, font color = `#000000`, callout value color = `#E60000`.
 
@@ -610,7 +608,7 @@ Use `Story Label` on the Y-axis. Filter out blanks (where story_id is null).
 ```dax
 Unique Readers =
 CALCULATE(
-    DISTINCTCOUNT(Events[gpn]),
+    DISTINCTCOUNT(Events[person_hash]),
     Events[action_type] = "Read"
 )
 ```
@@ -681,40 +679,25 @@ CALCULATE(
 
 ---
 
-## 9. Page 4 — Data Quality
+## 9. Page 4 — Data Completeness
 
 ### Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  [Date Slicer]                                                  │
-├─────────────────────────────────┬───────────────────────────────┤
-│  GPN→HR Mapping Coverage (bar)  │  GPN Length Distribution (bar)│
-├─────────────────────────────────┴───────────────────────────────┤
-│                   Unmatched GPNs Table                          │
+├─────────────────────────────────────────────────────────────────┤
+│          Organisational Data Coverage (stacked bar)              │
 ├─────────────────────────────────────────────────────────────────┤
 │                   Field Coverage Table                          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.1 GPN → HR Mapping Coverage
+### 9.1 Organisational Data Coverage
 
 **Visual type**: Clustered bar chart (horizontal, 3 bars)
 
-Create a DAX summary table visual using three explicit measures:
-
-```dax
-HR Matched % =
-DIVIDE([HR Matched Count], [Total Clicks], 0) * 100
-
-GPN No HR % =
-DIVIDE([GPN No HR Count], [Total Clicks], 0) * 100
-
-No GPN % =
-DIVIDE([No GPN Count], [Total Clicks], 0) * 100
-```
-
-**Approach A — Stacked bar**: Use a single 100% stacked bar chart:
+Shows what proportion of clicks have organisational fields populated (division, region, etc.).
 
 Create a helper table:
 
@@ -723,9 +706,9 @@ CoverageCategory =
 DATATABLE(
     "Category", STRING, "SortOrder", INTEGER,
     {
-        {"HR Matched", 1},
-        {"GPN but no HR", 2},
-        {"No GPN", 3}
+        {"Org Data Available", 1},
+        {"User Known, No Org Data", 2},
+        {"Unknown User", 3}
     }
 )
 ```
@@ -736,9 +719,9 @@ And a measure that switches by category:
 Coverage Count =
 SWITCH(
     SELECTEDVALUE(CoverageCategory[Category]),
-    "HR Matched", [HR Matched Count],
-    "GPN but no HR", [GPN No HR Count],
-    "No GPN", [No GPN Count],
+    "Org Data Available", [Org Matched Count],
+    "User Known, No Org Data", [User No Org Count],
+    "Unknown User", [No User Count],
     0
 )
 ```
@@ -750,78 +733,25 @@ SWITCH(
 | Data labels | On — value and percentage |
 
 **Manual colors**:
-- HR Matched → `#6F7A1A` (RAG Green)
-- GPN but no HR → `#E4A911` (RAG Amber)
-- No GPN → `#CCCABC` (Light gray)
+- Org Data Available → `#6F7A1A` (RAG Green)
+- User Known, No Org Data → `#E4A911` (RAG Amber)
+- Unknown User → `#CCCABC` (Light gray)
 
-### 9.2 GPN Length Distribution
-
-**Visual type**: Clustered bar chart (vertical)
-
-```dax
-GPN Length = LEN(Events[gpn])
-```
-
-Add as a calculated column, then:
-
-| Setting | Value |
-|---------|-------|
-| X-axis | Events[GPN Length] |
-| Y-axis | Distinct count of Events[gpn] |
-| Bar color | `#5A5D5C` |
-| Data labels | On |
-| Filter | Exclude blanks (where gpn is null) |
-
-### 9.3 Unmatched GPNs Table
-
-**Visual type**: Table
-
-| Column | Measure / Field |
-|--------|----------------|
-| GPN | Events[gpn] |
-| Clicks | `[Total Clicks]` |
-| Sessions | `[Unique Sessions]` |
-| First Seen | `MIN(Events[session_date])` |
-| Last Seen | `MAX(Events[session_date])` |
-| Sample Email | `FIRSTNONBLANK(Events[email], 1)` |
-
-**Filter**: Add a visual-level filter where `hr_division` IS BLANK and `gpn` IS NOT BLANK.
-
-**DAX measures for this table**:
-
-```dax
-First Seen = MIN(Events[session_date])
-
-Last Seen = MAX(Events[session_date])
-
-Sample Email = FIRSTNONBLANK(Events[email], 1)
-```
-
-### 9.4 Field Coverage Table
+### 9.2 Field Coverage Table
 
 **Visual type**: Table (or Matrix)
 
-This requires checking null counts per field. The simplest approach is a set of measures:
-
-```dax
-// Repeat this pattern for each field
-GPN Non-Null = COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[gpn]))))
-GPN Null = COUNTROWS(FILTER(Events, ISBLANK(Events[gpn])))
-GPN Coverage % = DIVIDE([GPN Non-Null], [Total Clicks], 0) * 100
-```
-
-**Efficient alternative** — Use a disconnected field list table and SWITCH:
+Shows null rates per field. Use a disconnected field list table and SWITCH:
 
 ```dax
 FieldList =
 DATATABLE(
     "FieldName", STRING,
     {
-        {"gpn"}, {"email"}, {"session_id"}, {"user_id"},
+        {"person_hash"}, {"session_id"}, {"user_id"},
         {"story_id"}, {"action_type"},
         {"hr_division"}, {"hr_unit"}, {"hr_area"},
-        {"hr_region"}, {"hr_country"},
-        {"hr_job_title"}, {"hr_management_level"}
+        {"hr_region"}, {"hr_country"}
     }
 )
 ```
@@ -831,8 +761,7 @@ Field Non-Null Count =
 VAR _field = SELECTEDVALUE(FieldList[FieldName])
 RETURN SWITCH(
     _field,
-    "gpn", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[gpn])))),
-    "email", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[email])))),
+    "person_hash", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[person_hash])))),
     "session_id", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[session_id])))),
     "user_id", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[user_id])))),
     "story_id", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[story_id])))),
@@ -842,8 +771,6 @@ RETURN SWITCH(
     "hr_area", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_area])))),
     "hr_region", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_region])))),
     "hr_country", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_country])))),
-    "hr_job_title", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_job_title])))),
-    "hr_management_level", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_management_level])))),
     BLANK()
 )
 
@@ -918,7 +845,7 @@ To control cross-filtering: select a visual → Format → Edit interactions →
 
 Total Clicks = COUNTROWS(Events)
 
-Unique Users = DISTINCTCOUNT(Events[gpn])
+Unique Users = DISTINCTCOUNT(Events[person_hash])
 
 Unique Sessions = DISTINCTCOUNT(Events[session_key])
 
@@ -927,7 +854,7 @@ Unique Stories = DISTINCTCOUNT(Events[story_id])
 Clicks per User =
 DIVIDE([Total Clicks], [Unique Users], 0)
 
-HR Coverage % =
+Org Coverage % =
 DIVIDE(
     COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_division])))),
     [Total Clicks],
@@ -957,7 +884,7 @@ Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 Reads per User = DIVIDE([Reads], [Unique Users], 0)
 
 Unique Readers =
-CALCULATE(DISTINCTCOUNT(Events[gpn]), Events[action_type] = "Read")
+CALCULATE(DISTINCTCOUNT(Events[person_hash]), Events[action_type] = "Read")
 
 Daily Reads =
 CALCULATE(COUNTROWS(Events), Events[action_type] = "Read")
@@ -979,29 +906,29 @@ DIVIDE(
 
 
 // ═══════════════════════════════════════════
-// DATA QUALITY
+// DATA COMPLETENESS
 // ═══════════════════════════════════════════
 
-HR Matched Count =
+Org Matched Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[gpn])) && NOT(ISBLANK(Events[hr_division]))
+        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[hr_division]))
     )
 )
 
-GPN No HR Count =
+User No Org Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[gpn])) && ISBLANK(Events[hr_division])
+        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[hr_division])
     )
 )
 
-No GPN Count =
-COUNTROWS(FILTER(Events, ISBLANK(Events[gpn])))
+No User Count =
+COUNTROWS(FILTER(Events, ISBLANK(Events[person_hash])))
 
-HR Matched % = DIVIDE([HR Matched Count], [Total Clicks], 0) * 100
-GPN No HR % = DIVIDE([GPN No HR Count], [Total Clicks], 0) * 100
-No GPN % = DIVIDE([No GPN Count], [Total Clicks], 0) * 100
+Org Matched % = DIVIDE([Org Matched Count], [Total Clicks], 0) * 100
+User No Org % = DIVIDE([User No Org Count], [Total Clicks], 0) * 100
+No User % = DIVIDE([No User Count], [Total Clicks], 0) * 100
 
 
 // ═══════════════════════════════════════════
@@ -1011,8 +938,6 @@ No GPN % = DIVIDE([No GPN Count], [Total Clicks], 0) * 100
 First Seen = MIN(Events[session_date])
 
 Last Seen = MAX(Events[session_date])
-
-Sample Email = FIRSTNONBLANK(Events[email], 1)
 
 
 // ═══════════════════════════════════════════
@@ -1035,9 +960,6 @@ IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
 
 Story Label =
 IF(NOT(ISBLANK(Events[story_id])), "Story " & Events[story_id], BLANK())
-
-GPN Length =
-IF(NOT(ISBLANK(Events[gpn])), LEN(Events[gpn]), BLANK())
 
 Division Display =
 IF(ISBLANK(Events[hr_division]), "(unknown)", Events[hr_division])
@@ -1069,9 +991,9 @@ CoverageCategory =
 DATATABLE(
     "Category", STRING, "SortOrder", INTEGER,
     {
-        {"HR Matched", 1},
-        {"GPN but no HR", 2},
-        {"No GPN", 3}
+        {"Org Data Available", 1},
+        {"User Known, No Org Data", 2},
+        {"Unknown User", 3}
     }
 )
 
@@ -1080,11 +1002,10 @@ FieldList =
 DATATABLE(
     "FieldName", STRING,
     {
-        {"gpn"}, {"email"}, {"session_id"}, {"user_id"},
+        {"person_hash"}, {"session_id"}, {"user_id"},
         {"story_id"}, {"action_type"},
         {"hr_division"}, {"hr_unit"}, {"hr_area"},
-        {"hr_region"}, {"hr_country"},
-        {"hr_job_title"}, {"hr_management_level"}
+        {"hr_region"}, {"hr_country"}
     }
 )
 ```
@@ -1108,7 +1029,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 
 ## Quick-Start Checklist
 
-1. [ ] Import `events_raw.parquet` → rename table to **Events**
+1. [ ] Import `events_anonymized.parquet` → rename table to **Events**
 2. [ ] Create **DateTable**, **HourTable**, **CoverageCategory**, **FieldList** DAX tables
 3. [ ] Set up relationships (Events → DateTable, Events → HourTable)
 4. [ ] Create `_Measures` table and paste all DAX measures
@@ -1117,7 +1038,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 7. [ ] Build Page 1 (Overview) — KPIs, trend, hour/weekday bars, heatmap, doughnut
 8. [ ] Build Page 2 (Divisions & Regions) — GCRS hierarchy, region drilldown, table
 9. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
-10. [ ] Build Page 4 (Data Quality) — coverage bars, GPN table, field coverage
+10. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
 11. [ ] Add slicers (Date, Action Type, Link Type) to each page
 12. [ ] Configure cross-filter interactions between visuals
 13. [ ] Test drill-down on Division and Region charts
