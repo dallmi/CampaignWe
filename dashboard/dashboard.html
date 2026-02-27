@@ -493,10 +493,21 @@
                 const b64 = chart.toBase64Image('image/png', 2);
                 const data = b64.split(',')[1];
                 if (!data) return startRow;
+                // Calculate row span from actual image aspect ratio
+                const canvas = chart.canvas;
+                const colWidth = endCol - startCol;
+                const pxPerCol = 64; // approx px per Excel column
+                const imgW = canvas.width, imgH = canvas.height;
+                const displayW = colWidth * pxPerCol;
+                const displayH = imgH * (displayW / imgW);
+                const pxPerRow = 15; // default Excel row height in px
+                const calcSpan = Math.ceil(displayH / pxPerRow) + 2;
+                const finalSpan = Math.max(rowSpan, calcSpan);
                 const imgId = wb.addImage({ base64: data, extension: 'png' });
-                ws.addImage(imgId, { tl: { col: startCol, row: startRow }, br: { col: endCol, row: startRow + rowSpan }, editAs: 'oneCell' });
+                ws.addImage(imgId, { tl: { col: startCol, row: startRow }, br: { col: endCol, row: startRow + finalSpan }, editAs: 'oneCell' });
+                return startRow + finalSpan + 2;
             } catch (e) { console.warn('Chart image export failed for', chartKey, e); }
-            return startRow + rowSpan + 1;
+            return startRow + rowSpan + 2;
         }
 
         // --- Per-tab worksheet composers ---
