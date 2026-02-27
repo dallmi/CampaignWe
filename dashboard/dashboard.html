@@ -1624,7 +1624,7 @@
             const minPct = 15; // minimum bar width % so smallest step is still visible
             container.innerHTML = steps.map((s, i) => {
                 const widthPct = Math.max(minPct, (s.value / topVal) * 100);
-                const conv = i === 0 ? '' : ` (${steps[i-1].value ? pct(s.value, steps[i-1].value) : 0}%)`;
+                const conv = ` (${topVal ? pct(s.value, topVal) : 0}%)`;
                 return `<div style="display:flex;align-items:center;justify-content:center;margin-bottom:4px">
                     <div style="width:110px;text-align:right;padding-right:12px;font-size:12px;font-weight:600;color:#404040;flex-shrink:0">${s.label}</div>
                     <div style="flex:1;display:flex;justify-content:center">
@@ -1649,15 +1649,15 @@
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY story_id ORDER BY reads DESC
             `);
-            const headers = ['Story', 'Unique Readers', 'View Prompts', 'Reads', 'Likes', 'Shares', 'Hides'];
+            const headers = ['Story', 'View Prompts', 'Reads', 'Unique Readers', 'Likes', 'Shares', 'Hides'];
             const rightAlign = [false, true, true, true, true, true, true];
             const rows = data.map(d => [
-                storyLabel(d), Number(d.unique_readers), Number(d.view_prompts),
-                Number(d.reads), Number(d.likes), Number(d.shares), Number(d.hides)
+                storyLabel(d), Number(d.view_prompts), Number(d.reads),
+                Number(d.unique_readers), Number(d.likes), Number(d.shares), Number(d.hides)
             ]);
             tableData.storyEngagement = { headers, rows, rightAlign };
             const container = document.getElementById('storyEngagementTable');
-            container.innerHTML = renderSortableTable(headers, rows, rightAlign, 'storyEngagement', 3, 'desc');
+            container.innerHTML = renderSortableTable(headers, rows, rightAlign, 'storyEngagement', 2, 'desc');
         }
 
         function renderSortableTable(headers, rows, rightAlign, tableId, defaultSortCol, defaultSortDir) {
