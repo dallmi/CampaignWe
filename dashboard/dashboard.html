@@ -766,7 +766,6 @@
                 document.getElementById('dateFilterControls').classList.remove('loading');
 
                 await renderDashboard();
-                updateStatus('success', 'Ready');
             } catch (err) {
                 console.error('Init error:', err);
                 document.getElementById('loadingState').innerHTML = `<div class="error-message">Failed to initialize: ${err.message}</div>`;
@@ -1123,7 +1122,17 @@
                 const results = await Promise.allSettled(tasks.map(fn => fn()));
                 const fails = results.filter(r => r.status === 'rejected');
                 if (fails.length) { console.error('Render failures:', fails.map(f => f.reason)); updateStatus('warning', `${fails.length} section(s) failed`); }
-                else { updateStatus('success', 'Ready'); }
+                else {
+                    try {
+                        const latest = await q(`SELECT MAX(timestamp_cet) as latest FROM events`);
+                        const ts = latest[0]?.latest;
+                        if (ts) {
+                            const d = new Date(ts);
+                            const label = d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+                            updateStatus('success', `Latest data: ${label}`);
+                        } else { updateStatus('success', 'Ready'); }
+                    } catch(e) { updateStatus('success', 'Ready'); }
+                }
             } finally { renderInProgress = false; }
         }
 
