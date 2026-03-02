@@ -104,6 +104,25 @@ ClickData
 | order by ['timestamp [UTC]'] desc
 
 
+// --- QUERY E: Distinct hashed GPNs vs user_Ids (30 days) ---
+// Compares how many unique identifiers exist via each method.
+// Helps assess whether GPN-based hashing covers more or fewer users than App Insights user_Id.
+customEvents
+| where timestamp >= ago(30d)
+| where name == 'click_event'
+| extend cd = todynamic(customDimensions)
+| extend CP = todynamic(tostring(cd.CustomProps))
+| where tostring(CP.PageURL) contains 'gwm-prompt-library'
+| extend GPN = tostring(CP.GPN)
+| extend HashedGPN = iff(isnotempty(GPN), hash_sha256(GPN), "")
+| summarize
+    TotalEvents = count(),
+    DistinctHashedGPNs = dcountif(HashedGPN, isnotempty(HashedGPN)),
+    DistinctUserIds = dcount(user_Id),
+    EventsWithGPN = countif(isnotempty(GPN)),
+    EventsWithoutGPN = countif(isempty(GPN))
+
+
 // --- QUERY D: Filter by specific email (change EmailFilter value) ---
 set truncationmaxrecords = 500000;
 let TimeRange = 90d;
