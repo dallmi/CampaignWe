@@ -3,7 +3,7 @@ Convert story list CSV (from Power Automate) to Parquet lookup table.
 
 The CSV is automatically synced by a Power Automate flow from a SharePoint list
 into a OneDrive folder. This script reads it, filters active stories (Status#Id = 1),
-and saves story_metadata.parquet with ID, title, and metadata columns.
+and saves story_metadata.parquet with ID, title, and author metadata columns.
 
 Input priority:
   1. OneDrive sync folder: <OneDrive>/Projekte/CampaignWe/input/We Are *.csv
@@ -42,11 +42,11 @@ COLUMN_MAP = {
 EXTRA_COLUMNS = {
     "status_id": ["Status#Id", "StatusId", "Status_Id", "status#id"],
     "keys": ["*Keys"],  # suffix match — the only column ending in "Keys"
-    "email": ["Email", "E-Mail", "email"],
-    "division": ["Division", "division"],
-    "region": ["Region", "region"],
-    "department": ["Department", "department"],
-    "job_title": ["JobTitle", "Job Title", "jobtitle", "job_title"],
+    "author_email": ["Email", "E-Mail", "email"],
+    "author_division": ["Division", "division"],
+    "author_region": ["Region", "region"],
+    "author_department": ["Department", "department"],
+    "author_job_title": ["JobTitle", "Job Title", "jobtitle", "job_title"],
     "created": ["Created", "created"],
     "modified": ["Modified", "modified"],
 }
@@ -206,7 +206,7 @@ def main():
     # These come as JSON like [{"Id":2,"Value":"Connectivity"}, ...] (array)
     # or {"Id":2,"Value":"APAC"} (single object)
     # Extract the "Value" field(s) into a comma-separated string
-    SP_LOOKUP_COLUMNS = ["keys", "division", "region"]
+    SP_LOOKUP_COLUMNS = ["keys", "author_division", "author_region"]
 
     def parse_sp_lookup(val):
         if pd.isna(val) or val == "":
