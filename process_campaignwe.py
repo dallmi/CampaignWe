@@ -952,16 +952,11 @@ def print_summary(con, output_dir=None):
 
         # Top stories by reads
         has_title = 'story_title' in events_cols
-        has_text = 'story_text' in events_cols
-        label_select = ""
-        if has_title:
-            label_select = ", MAX(story_title) as story_title"
-        elif has_text:
-            label_select = ", MAX(story_text) as story_text"
+        title_select = ", MAX(story_title) as story_title" if has_title else ""
         top_stories = con.execute(f"""
             SELECT
                 story_id
-                {label_select},
+                {title_select},
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(DISTINCT gpn) as unique_readers,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
@@ -972,14 +967,35 @@ def print_summary(con, output_dir=None):
             LIMIT 10
         """).df()
 
+        # Build story_id -> label lookup: story_title -> author_email -> story_id
+        story_labels = {}
+        try:
+            st_cols = [r[0] for r in con.execute("DESCRIBE story_titles").fetchall()]
+            label_cols = []
+            if 'story_title' in st_cols:
+                label_cols.append("story_title")
+            if 'author_email' in st_cols:
+                label_cols.append("author_email")
+            if label_cols:
+                meta = con.execute(f"SELECT story_id, {', '.join(label_cols)} FROM story_titles").df()
+                for _, m in meta.iterrows():
+                    label = None
+                    if 'story_title' in label_cols and m.get('story_title'):
+                        label = str(m['story_title'])
+                    elif 'author_email' in label_cols and m.get('author_email'):
+                        label = str(m['author_email'])
+                    if label:
+                        story_labels[str(m['story_id'])] = label[:28]
+        except Exception:
+            pass  # story_titles table may not exist
+
         if len(top_stories) > 0:
             log("\n    Top stories by reads:")
-            if has_title or has_text:
-                label_col = 'story_title' if has_title else 'story_text'
-                log(f"    {'Story ID':<12s} {'Title':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
+            if story_labels:
+                log(f"    {'Story ID':<12s} {'Label':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
                 for _, row in top_stories.iterrows():
-                    title = str(row[label_col] or '')[:28]
-                    log(f"    {str(row['story_id']):<12s} {title:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
+                    label = story_labels.get(str(row['story_id']), '')
+                    log(f"    {str(row['story_id']):<12s} {label:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
             else:
                 log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
                 for _, row in top_stories.iterrows():
