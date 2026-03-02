@@ -816,12 +816,17 @@
                 for (const p of paths) {
                     try {
                         await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}story_metadata.parquet')`);
-                        const metaRows = (await conn.query('SELECT story_id, author_email, story_title AS meta_title FROM story_meta')).toArray();
+                        const metaRows = (await conn.query('SELECT * FROM story_meta')).toArray();
                         window._storyMeta = {};
-                        metaRows.forEach(r => { window._storyMeta[String(r.story_id)] = { author_email: r.author_email, title: r.meta_title }; });
-                        setLoadingText('Loaded story metadata...');
+                        metaRows.forEach(r => {
+                            const email = r.author_email || r.email || null;
+                            window._storyMeta[String(r.story_id)] = { author_email: email, title: r.story_title || null };
+                        });
+                        console.log('Story metadata loaded:', metaRows.length, 'stories. Columns:', metaRows.length > 0 ? Object.keys(metaRows[0]) : '(empty)');
+                        console.log('Sample entry:', metaRows.length > 0 ? window._storyMeta[String(metaRows[0].story_id)] : '(none)');
+                        setLoadingText(`Loaded story metadata (${metaRows.length} stories)...`);
                         break;
-                    } catch(e) { /* try next path */ }
+                    } catch(e) { console.warn('Story metadata path failed:', p, e.message); }
                 }
             } catch(e) { /* story_metadata not available — labels will fall back to Story ID */ }
         }
