@@ -810,6 +810,20 @@
             }
 
             await load('events', 'events_raw.parquet', 'Loaded events...');
+
+            // Load story metadata lookup (optional — silently skip if not found)
+            try {
+                for (const p of paths) {
+                    try {
+                        await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}story_metadata.parquet')`);
+                        const metaRows = (await conn.query('SELECT story_id, author_email, story_title AS meta_title FROM story_meta')).toArray();
+                        window._storyMeta = {};
+                        metaRows.forEach(r => { window._storyMeta[String(r.story_id)] = { author_email: r.author_email, title: r.meta_title }; });
+                        setLoadingText('Loaded story metadata...');
+                        break;
+                    } catch(e) { /* try next path */ }
+                }
+            } catch(e) { /* story_metadata not available — labels will fall back to Story ID */ }
         }
 
         // =====================================================================
@@ -952,7 +966,12 @@
             return s.includes('T') ? s.split('T')[0] : s;
         }
 
-        function storyLabel(d) { return d.story_title || ('Story ' + d.story_id); }
+        function storyLabel(d) {
+            if (d.story_title) return d.story_title;
+            const meta = window._storyMeta && window._storyMeta[String(d.story_id)];
+            if (meta) return meta.title || meta.author_email || ('Story ' + d.story_id);
+            return 'Story ' + d.story_id;
+        }
 
         function formatNumber(num) {
             if (num === null || num === undefined) return '\u2014';

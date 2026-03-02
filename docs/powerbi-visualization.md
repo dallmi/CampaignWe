@@ -31,25 +31,30 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 | File | Grain | Description |
 |------|-------|-------------|
 | `events_anonymized.parquet` | One row per click event | Anonymised click data with organisational fields — primary source for all visuals |
+| `story_metadata.parquet` | One row per story | Story lookup table with title, author info, and keys |
 
 ### Import Steps
 
 1. **Get Data → Parquet**
    - Home → Get Data → More → Parquet
    - Browse to `events_anonymized.parquet` → Load
+   - Repeat for `story_metadata.parquet` → Load
 
 2. **Rename tables** in the Model view:
    - `events_anonymized` → **Events**
+   - `story_metadata` → **StoryMeta**
 
 3. **Check column types** in Power Query Editor (Transform Data):
-   - `session_date` / `date` → **Date**
-   - `timestamp`, `timestamp_cet` → **DateTime**
-   - `event_hour`, `event_weekday_num`, `story_id` → **Whole Number**
-   - `person_hash` → **Text**
-   - All `hr_*` columns → **Text**
-   - All count columns → **Whole Number**
+   - Events: `session_date` / `date` → **Date**
+   - Events: `timestamp`, `timestamp_cet` → **DateTime**
+   - Events: `event_hour`, `event_weekday_num`, `story_id` → **Whole Number**
+   - Events: `person_hash` → **Text**
+   - Events: All `hr_*` columns → **Text**
+   - Events: All count columns → **Whole Number**
+   - StoryMeta: `story_id` → **Text** (to match Events[story_id] after cast)
+   - StoryMeta: `author_email`, `author_division`, `author_department`, `author_job_title` → **Text**
 
-All dashboard visuals run against event-level data. No pre-aggregated tables are needed.
+All dashboard visuals run against event-level data. The StoryMeta table provides story labels and author information.
 
 ---
 
@@ -88,6 +93,7 @@ Rename the column to `Hour`.
 |------|----|-------------|-----|
 | Events[session_date] | DateTable[Date] | Many-to-One | Active |
 | Events[event_hour] | HourTable[Hour] | Many-to-One | Active |
+| Events[story_id] | StoryMeta[story_id] | Many-to-One | Active |
 
 Set cross-filter direction to **Single** for all relationships.
 
@@ -593,10 +599,17 @@ Colors will auto-assign from the 20-color theme palette.
 | Data labels | On |
 | Sort | Descending by value |
 
-**Label formatting**: To display "Story 42" instead of just "42", create:
+**Label formatting**: Create a calculated column that shows the story title when available, falls back to the author's email (from `StoryMeta`), and finally to "Story {id}":
 
 ```dax
-Story Label = "Story " & Events[story_id]
+Story Label =
+IF(
+    ISBLANK(Events[story_id]),
+    BLANK(),
+    VAR _title = RELATED(StoryMeta[story_title])
+    VAR _author = RELATED(StoryMeta[author_email])
+    RETURN COALESCE(_title, _author, "Story " & Events[story_id])
+)
 ```
 
 Use `Story Label` on the Y-axis. Filter out blanks (where story_id is null).
@@ -958,8 +971,15 @@ IF(ISBLANK(Events[action_type]), "(null)", Events[action_type])
 Link Type Display =
 IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
 
+// Story Label: use story_title if available, then author_email from StoryMeta, then fallback to "Story {id}"
 Story Label =
-IF(NOT(ISBLANK(Events[story_id])), "Story " & Events[story_id], BLANK())
+IF(
+    ISBLANK(Events[story_id]),
+    BLANK(),
+    VAR _title = RELATED(StoryMeta[story_title])
+    VAR _author = RELATED(StoryMeta[author_email])
+    RETURN COALESCE(_title, _author, "Story " & Events[story_id])
+)
 
 Division Display =
 IF(ISBLANK(Events[hr_division]), "(unknown)", Events[hr_division])
@@ -1030,8 +1050,9 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 ## Quick-Start Checklist
 
 1. [ ] Import `events_anonymized.parquet` → rename table to **Events**
-2. [ ] Create **DateTable**, **HourTable**, **CoverageCategory**, **FieldList** DAX tables
-3. [ ] Set up relationships (Events → DateTable, Events → HourTable)
+2. [ ] Import `story_metadata.parquet` → rename table to **StoryMeta**
+3. [ ] Create **DateTable**, **HourTable**, **CoverageCategory**, **FieldList** DAX tables
+4. [ ] Set up relationships (Events → DateTable, Events → HourTable, Events → StoryMeta)
 4. [ ] Create `_Measures` table and paste all DAX measures
 5. [ ] Add calculated columns (Action Type Display, Story Label, etc.)
 6. [ ] Import `campaignwe-theme.json` (View → Themes → Browse)
