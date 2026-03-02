@@ -809,7 +809,7 @@
                 throw new Error(`Could not find ${file}`);
             }
 
-            await load('events', 'events_raw.parquet', 'Loaded events...');
+            await load('events', 'events_anonymized.parquet', 'Loaded events...');
 
             // Load story metadata lookup (optional — silently skip if not found)
             try {
