@@ -268,7 +268,25 @@ The DuckDB database at `data/campaignwe.db` contains:
 
 ---
 
-## Dashboard
+## Dashboard & Power BI Semantic Model
+
+The parquet outputs serve two consumers:
+
+```
+  output/events_anonymized.parquet ─┬──► dashboard/dashboard.html  (DuckDB WASM, in-browser)
+  output/story_metadata.parquet    ─┤
+                                    └──► Power BI Semantic Model
+                                           ├── Events (fact table)
+                                           ├── StoryMeta (lookup)
+                                           ├── DateTable, HourTable (helpers, connected)
+                                           ├── CoverageCategory, FieldList (helpers, disconnected)
+                                           ├── _Measures (15 DAX measures)
+                                           └── Calculated columns on Events
+```
+
+The Power BI semantic model imports the same parquet files and adds DAX measures, calculated columns, and helper tables on top. See [powerbi-visualization.md](powerbi-visualization.md) for the full model diagram and setup guide.
+
+### HTML Dashboard
 
 The interactive dashboard at `dashboard/dashboard.html` loads the Parquet files directly in the browser using DuckDB WASM. No server is required.
 

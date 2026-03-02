@@ -59,6 +59,54 @@ All dashboard visuals run against event-level data. The StoryMeta table provides
 
 ## 2. Data Model & Relationships
 
+### Semantic Model Overview
+
+The Power BI semantic model consists of connected tables (with relationships), disconnected helper tables, a dedicated measures table, and calculated columns on the Events fact table.
+
+```
+                         ┌─────────────────────┐
+                         │     DateTable        │
+                         │─────────────────────│
+                         │ Date (PK)           │
+                         │ Year, Month, ...    │
+                         └──────────┬──────────┘
+                                    │ 1
+                                    │
+                                    │ *
+┌───────────────┐     ┌─────────────────────────────────┐     ┌──────────────┐
+│   StoryMeta   │     │            Events               │     │  HourTable   │
+│───────────────│     │            (fact table)          │     │──────────────│
+│ story_id (PK) │1───*│ session_date ──► DateTable      │*───1│ Hour (PK)    │
+│ story_text    │     │ event_hour   ──► HourTable      │     └──────────────┘
+│ author_*      │     │ story_id     ──► StoryMeta      │
+│               │     │ person_hash, action_type, ...   │
+│               │     │                                 │
+│               │     │ ── Calculated Columns ───────── │
+│               │     │ Action Type Display             │
+│               │     │ Link Type Display               │
+│               │     │ Story Label (via RELATED)       │
+│               │     │ Division Display                │
+│               │     │ Region Display                  │
+└───────────────┘     └─────────────────────────────────┘
+
+ Disconnected helper tables              Measures table
+┌──────────────────┐  ┌──────────────┐  ┌──────────────────────┐
+│ CoverageCategory │  │  FieldList   │  │     _Measures        │
+│──────────────────│  │──────────────│  │──────────────────────│
+│ Category         │  │ FieldName    │  │ Total Clicks         │
+│ SortOrder        │  │              │  │ Views, Likes         │
+│                  │  │              │  │ Unique Visitors      │
+│ Used via         │  │ Used via     │  │ Views/Clicks per     │
+│ SELECTEDVALUE()  │  │ SELECTEDVALUE│  │   Visitor            │
+│ in Coverage      │  │ in Field     │  │ Coverage Count       │
+│ Count measure    │  │ Coverage %   │  │ Daily Views          │
+│                  │  │ measure      │  │ Weekday Color        │
+│                  │  │              │  │ ... (15 measures)    │
+└──────────────────┘  └──────────────┘  └──────────────────────┘
+```
+
+**Relationship lines**: `1───*` = One-to-Many. All relationships use **Single** cross-filter direction. Disconnected tables interact with measures via `SELECTEDVALUE()` — no relationship lines needed.
+
 ### Date Table (Required for Time Intelligence)
 
 Power BI needs a proper date table for time-intelligence DAX functions. Create one:
