@@ -1179,10 +1179,20 @@ def process_campaignwe(input_file=None, full_refresh=False):
                 UPDATE events SET story_keys = st.keys
                 FROM story_titles st WHERE events.story_id = st.story_id;
             """)
-        matched = con.execute("""
+        has_st_text = 'story_text' in st_cols
+        has_st_title = 'story_title' in st_cols
+        if has_st_text and has_st_title:
+            match_where = "story_text IS NOT NULL OR story_title IS NOT NULL"
+        elif has_st_text:
+            match_where = "story_text IS NOT NULL"
+        elif has_st_title:
+            match_where = "story_title IS NOT NULL"
+        else:
+            match_where = None
+        matched = con.execute(f"""
             SELECT COUNT(DISTINCT story_id) FROM events
-            WHERE story_id IS NOT NULL AND (story_text IS NOT NULL OR story_title IS NOT NULL)
-        """).fetchone()[0]
+            WHERE story_id IS NOT NULL AND ({match_where})
+        """).fetchone()[0] if match_where else 0
         total = con.execute("""
             SELECT COUNT(DISTINCT story_id) FROM events
             WHERE story_id IS NOT NULL
