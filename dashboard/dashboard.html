@@ -972,9 +972,11 @@
         }
 
         function storyLabel(d) {
-            if (d.story_title) return d.story_title;
             const meta = window._storyMeta && window._storyMeta[String(d.story_id)];
-            if (meta) return meta.title || meta.author_email || ('Story ' + d.story_id);
+            // Prefer author_email for concise labels; fall back to story_title, then Story {id}
+            if (meta && meta.author_email) return meta.author_email;
+            if (d.story_title) return d.story_title;
+            if (meta && meta.title) return meta.title;
             return 'Story ' + d.story_id;
         }
 
