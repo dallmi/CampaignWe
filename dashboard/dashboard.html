@@ -330,7 +330,10 @@
                         <div id="creationFunnelContainer"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Story Engagement Summary</div>
+                        <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">
+                            Story Engagement Summary
+                            <button class="export-btn" onclick="exportStoryEngagement(event)" style="padding:0.2rem 0.6rem;font-size:0.75rem;font-weight:600;cursor:pointer;">Export XLSX</button>
+                        </div>
                         <div class="table-container" id="storyEngagementTable"></div>
                     </div>
                     <div class="chart-card full-width">
@@ -716,6 +719,34 @@
                 const names = { tabOverview: 'overview', tabDivisions: 'divisions', tabStories: 'stories', tabQuality: 'quality' };
                 const buffer = await wb.xlsx.writeBuffer();
                 downloadExcelBuffer(buffer, `campaignwe_${names[tabKey]}_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}.xlsx`);
+            } catch (err) {
+                console.error('Export failed:', err);
+                alert('Export failed: ' + err.message);
+            } finally {
+                if (btn) { btn.textContent = origText; btn.disabled = false; }
+            }
+        }
+
+        async function exportStoryEngagement(evt) {
+            const btn = evt && evt.target;
+            const origText = btn ? btn.textContent : '';
+            try {
+                if (btn) { btn.textContent = 'Exporting…'; btn.disabled = true; }
+                if (!tableData.storyEngagement) { alert('No story engagement data to export.'); return; }
+
+                const wb = new ExcelJS.Workbook();
+                wb.creator = 'Campaign Dashboard';
+                wb.created = new Date();
+                const ws = wb.addWorksheet('Story Engagement');
+                let r = 1;
+                r = addSectionTitle(ws, r, 'Story Engagement Summary', tableData.storyEngagement.headers.length); r++;
+                r = addStyledTable(ws, r, tableData.storyEngagement.headers, tableData.storyEngagement.rows, {
+                    rightAlign: tableData.storyEngagement.rightAlign
+                });
+                autoSizeColumns(ws);
+
+                const buffer = await wb.xlsx.writeBuffer();
+                downloadExcelBuffer(buffer, `campaignwe_story_engagement_${fmtDate(dateFilter.from)}_${fmtDate(dateFilter.to)}.xlsx`);
             } catch (err) {
                 console.error('Export failed:', err);
                 alert('Export failed: ' + err.message);
