@@ -16,11 +16,12 @@ Application Insights (KQL)
   process_campaignwe.py        <-- delta detection + upsert + enrichment
         |
         +---> data/campaignwe.db           (DuckDB database)
-        +---> output/events_raw.parquet    (all events with HR fields)
-        +---> output/events_anonymized.parquet   (anonymized: GPNs hashed, emails dropped)
+        +---> output/events_raw.parquet            (internal: all events with raw GPNs + emails)
+        +---> output/events_anonymized.parquet   (primary: GPNs hashed to person_hash, emails dropped)
+        +---> output/story_metadata.parquet      (story lookup: text, keys, author info)
         |
         v
-  dashboard/dashboard.html     <-- loads Parquet via DuckDB WASM
+  dashboard/dashboard.html     <-- loads events_anonymized + story_metadata via DuckDB WASM
 ```
 
 ---
@@ -200,8 +201,8 @@ This adds organisational fields: `hr_division`, `hr_unit`, `hr_area`, `hr_sector
 
 | Column | Description |
 |--------|-------------|
-| `gpn` | Normalised 8-digit GPN (zero-padded, `.0` stripped) |
-| `email` | Resolved from available email columns |
+| `gpn` | Normalised 8-digit GPN (zero-padded, `.0` stripped) — internal only, hashed to `person_hash` in anonymized export |
+| `email` | Resolved from available email columns — internal only, dropped in anonymized export |
 | `story_id` | Extracted from `CP_Link_label` via "story of NNN" pattern |
 | `action_type` | Classified from `CP_Link_label` (see mapping below) |
 | `timestamp_cet` | UTC converted to Europe/Berlin timezone |
@@ -231,22 +232,25 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 
 The `story_id` is extracted from the leading digits in `CP_Link_label` — e.g., `"15Read full story"` yields `story_id = 15`.
 
-#### Reads per User
+#### Views per Visitor
 
 Used in the dashboard and notebook engagement tables:
 
 ```
-reads_per_user = COUNT(action_type = 'Read') / COUNT(DISTINCT gpn)
+views_per_visitor = COUNT(action_type = 'Read') / COUNT(DISTINCT person_hash)
 ```
 
-This is the average number of story-open clicks per unique person within a given grouping (division, region, etc.).
+This is the average number of story-open clicks per unique visitor within a given grouping (division, region, etc.).
 
 ### 3. Parquet Export
 
 | File | Contents | Grain |
 |------|----------|-------|
-| `events_raw.parquet` | All events with all calculated + HR columns | One row per event |
-| `events_anonymized.parquet` | Same as above but GPNs hashed, emails dropped | One row per event |
+| `events_raw.parquet` | All events with raw GPNs, emails, and HR columns (internal use only) | One row per event |
+| `events_anonymized.parquet` | Primary export: GPNs hashed to `person_hash`, emails dropped | One row per event |
+| `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info, keys | One row per story |
+
+The **dashboard and Power BI** consume `events_anonymized.parquet` and `story_metadata.parquet`. The raw file is kept for internal diagnostics only.
 
 ---
 
@@ -256,9 +260,10 @@ The DuckDB database at `data/campaignwe.db` contains:
 
 | Table | Description |
 |-------|-------------|
-| `events_raw` | Raw imported data (pre-enrichment) |
+| `events_raw` | Raw imported data (pre-enrichment) — dropped after enrichment |
 | `events` | Final enriched table with all calculated columns |
-| `hr_history` | HR organisational data (loaded each run) |
+| `hr_history` | HR organisational data (loaded each run, dropped after join) |
+| `story_titles` | Story metadata (loaded each run from `story_metadata.parquet`, dropped after join) |
 | `processed_files` | File processing manifest for delta tracking |
 
 ---
@@ -271,8 +276,8 @@ The interactive dashboard at `dashboard/dashboard.html` loads the Parquet files 
 
 1. **Overview** -- KPIs, daily trends, hourly/weekday distributions, weekday × hour heatmap, action types, link types
 2. **Divisions & Regions** -- 6-level GCRS hierarchy drilldown, regional breakdown, engagement depth table
-3. **Stories** -- Top stories, engagement funnel, division/region heatmaps
-4. **Data Quality** -- GPN-HR mapping coverage, field null rates, unmatched GPNs
+3. **Stories** -- Top stories, engagement funnel, key engagement, division/region heatmaps, individual XLSX export
+4. **Data Completeness** -- Organisational data coverage, field fill rates
 
 ### Filters
 

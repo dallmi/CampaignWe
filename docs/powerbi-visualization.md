@@ -12,13 +12,12 @@ This document explains how to recreate the CampaignWe HTML dashboard in Power BI
 2. [Data Model & Relationships](#2-data-model--relationships)
 3. [Calculated Columns (Power Query)](#3-calculated-columns-power-query)
 4. [DAX Measures](#4-dax-measures)
-5. [Color Palette](#5-color-palette)
-6. [Page 1 — Overview](#6-page-1--overview)
-7. [Page 2 — Divisions & Regions](#7-page-2--divisions--regions)
-8. [Page 3 — Stories](#8-page-3--stories)
-9. [Page 4 — Data Completeness](#9-page-4--data-completeness)
-10. [Slicers & Cross-Filtering](#10-slicers--cross-filtering)
-11. [Appendix — Full DAX Reference](#11-appendix--full-dax-reference)
+5. [Page 1 — Overview](#5-page-1--overview)
+6. [Page 2 — Divisions & Regions](#6-page-2--divisions--regions)
+7. [Page 3 — Stories](#7-page-3--stories)
+8. [Page 4 — Data Completeness](#8-page-4--data-completeness)
+9. [Slicers & Cross-Filtering](#9-slicers--cross-filtering)
+10. [Appendix — Full DAX Reference](#10-appendix--full-dax-reference)
 
 ---
 
@@ -129,16 +128,16 @@ Create a dedicated **Measures** table (Enter Data → empty table → rename to 
 ```dax
 Total Clicks = COUNTROWS(Events)
 
-Unique Users = DISTINCTCOUNT(Events[person_hash])
+Unique Visitors = DISTINCTCOUNT(Events[person_hash])
 
 Unique Sessions = DISTINCTCOUNT(Events[session_key])
 
 Unique Stories = DISTINCTCOUNT(Events[story_id])
 
-Clicks per User =
+Clicks per Visitor =
 DIVIDE(
     [Total Clicks],
-    [Unique Users],
+    [Unique Visitors],
     0
 )
 
@@ -153,7 +152,7 @@ DIVIDE(
 ### Action Type Counts
 
 ```dax
-Reads = CALCULATE([Total Clicks], Events[action_type] = "Read")
+Views = CALCULATE([Total Clicks], Events[action_type] = "Read")
 
 Likes = CALCULATE([Total Clicks], Events[action_type] = "Like")
 
@@ -167,17 +166,17 @@ Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 ### Engagement Metrics
 
 ```dax
-Reads per User =
+Views per Visitor =
 DIVIDE(
-    [Reads],
-    [Unique Users],
+    [Views],
+    [Unique Visitors],
     0
 )
 
-Clicks per User (Division Table) =
+Clicks per Visitor (Division Table) =
 DIVIDE(
     [Total Clicks],
-    [Unique Users],
+    [Unique Visitors],
     0
 )
 ```
@@ -218,106 +217,7 @@ DIVIDE(
 
 ---
 
-## 5. Color Palette
-
-Apply the corporate color palette consistently across all visuals. In Power BI, set colors via **Format pane → Data colors** on each visual.
-
-### Core Colors
-
-| Usage | HEX | Where Used |
-|-------|-----|-----------|
-| Primary accent | `#E60000` | KPI highlights, primary bars |
-| Primary dark (hover) | `#8A000A` | Conditional formatting max |
-| Dark gray (bars) | `#404040` | Default bar color for single-series |
-| Medium-dark gray | `#5A5D5C` | Alternative bar color |
-| Medium gray | `#7A7870` | Secondary elements |
-| Light warm gray | `#B8B3A2` | Secondary series (Unique Users line) |
-| Lightest gray | `#CCCABC` | Weekend bars, tertiary |
-| Surface background | `#ECEBE4` | Card backgrounds |
-| Surface alt | `#F5F0E1` | Alternating rows |
-| Row alt | `#F8F7F2` | Table alternating rows |
-
-### RAG Status Colors
-
-| Status | HEX |
-|--------|-----|
-| Error/Red | `#BD000C` |
-| Warning/Amber | `#E4A911` |
-| Success/Green | `#6F7A1A` |
-
-### Chart Palette (20 colors for multi-series)
-
-For any chart with more than 2 series, assign colors in this order:
-
-```
-#AF8626  Bronze50
-#00759E  Lagoon60
-#879420  Kiwi60
-#4B2D58  Aubergine90
-#9F8865  Sand50
-#2E476B  Plum90
-#469A6C  Sage50
-#AD3E4A  Blush60
-#8489BD  Lavender50
-#0C7EC6  Lake50
-#654D16  Bronze80
-#804C95  Aubergine60
-#45999C  Mint50
-#4972AC  Plum60
-#CC707A  Blush40
-#295B40  Sage80
-#545A9C  Lavender70
-#785E4A  Chocolate60
-#07476F  Lake90
-#620004  Bordeaux90
-```
-
-### Setting Colors in Power BI
-
-**Theme file** (recommended): Create a `campaignwe-theme.json` and import via View → Themes → Browse for themes:
-
-```json
-{
-    "name": "CampaignWe",
-    "dataColors": [
-        "#AF8626", "#00759E", "#879420", "#4B2D58", "#9F8865",
-        "#2E476B", "#469A6C", "#AD3E4A", "#8489BD", "#0C7EC6",
-        "#654D16", "#804C95", "#45999C", "#4972AC", "#CC707A",
-        "#295B40", "#545A9C", "#785E4A", "#07476F", "#620004"
-    ],
-    "background": "#FFFFFF",
-    "foreground": "#000000",
-    "tableAccent": "#E60000",
-    "good": "#6F7A1A",
-    "neutral": "#E4A911",
-    "bad": "#BD000C",
-    "textClasses": {
-        "label": { "color": "#404040" },
-        "callout": { "color": "#000000" }
-    }
-}
-```
-
-### Heatmap Color Scale
-
-For conditional formatting on heatmaps (matrix visuals):
-
-| Position | Color | Meaning |
-|----------|-------|---------|
-| Minimum | `#FFFFFF` | Zero / no activity |
-| Low | `#F5F0E1` | Low activity |
-| Middle | `#E4A911` | Medium activity |
-| High | `#E60000` | High activity |
-| Maximum | `#8A000A` | Peak activity |
-
-Power BI supports a 3-stop gradient natively. Use:
-- Minimum: `#FFFFFF`
-- Center: `#E4A911`
-- Maximum: `#8A000A`
-
----
-
-## 6. Page 1 — Overview
+## 5. Page 1 — Overview
 
 ### Layout
 
@@ -325,8 +225,8 @@ Power BI supports a 3-stop gradient natively. Use:
 ┌─────────────────────────────────────────────────────────────────┐
 │  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
 ├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
-│  Total   │  Unique  │  Unique  │  Unique  │ Clicks / │   Org    │
-│  Clicks  │  Users   │ Sessions │ Stories  │  User    │ Coverage │
+│  Total   │ Unique   │  Unique  │  Unique  │ Clicks / │   Org    │
+│  Clicks  │ Visitors │ Sessions │ Stories  │ Visitor  │ Coverage │
 ├──────────┴──────────┴──────────┴──────────┴──────────┴──────────┤
 │              Daily Activity Trend (line + area)                  │
 ├────────────────────────────────────┬────────────────────────────┤
@@ -345,10 +245,10 @@ Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 | Card | Measure | Format |
 |------|---------|--------|
 | Total Clicks | `[Total Clicks]` | Whole number, thousands separator |
-| Unique Users | `[Unique Users]` | Whole number |
+| Unique Visitors | `[Unique Visitors]` | Whole number |
 | Unique Sessions | `[Unique Sessions]` | Whole number |
 | Unique Stories | `[Unique Stories]` | Whole number |
-| Clicks/User | `[Clicks per User]` | 1 decimal |
+| Clicks/Visitor | `[Clicks per Visitor]` | 1 decimal |
 | Org Coverage | `[Org Coverage %]` | 1 decimal + "%" suffix |
 
 **Formatting**: Background = `#ECEBE4`, font color = `#000000`, callout value color = `#E60000`.
@@ -361,11 +261,11 @@ Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 |---------|-------|
 | X-axis | DateTable[Date] |
 | Y-axis (Column series) | `[Total Clicks]` — set as **Area** |
-| Y-axis (Line series) | `[Unique Users]` — set as **Line**, dashed |
+| Y-axis (Line series) | `[Unique Visitors]` — set as **Line**, dashed |
 | Area color | `#404040` with ~30% opacity |
-| Line color | `#B8B3A2` |
+| Line color | `#B8B3A2` (Unique Visitors) |
 | Line style | Dashed |
-| Secondary Y-axis | On (for Unique Users) |
+| Secondary Y-axis | On (for Unique Visitors) |
 
 ### 6.3 Clicks by Hour
 
@@ -475,7 +375,7 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 
 ---
 
-## 7. Page 2 — Divisions & Regions
+## 6. Page 2 — Divisions & Regions
 
 ### Layout
 
@@ -485,13 +385,13 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 ├─────────────────────────────────┬───────────────────────────────┤
 │  Division Drilldown (bar)       │  Region → Country (bar)      │
 ├─────────────────────────────────┴───────────────────────────────┤
-│           Daily Users — Top 5 Divisions (multi-line)            │
+│        Daily Visitors — Top 5 Divisions (multi-line)            │
 ├─────────────────────────────────────────────────────────────────┤
 │                   Division Summary Table                        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.1 Division Drilldown (GCRS Hierarchy)
+### 6.1 Division Drilldown (GCRS Hierarchy)
 
 **Visual type**: Clustered bar chart with **drill-down hierarchy**
 
@@ -508,14 +408,14 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 | Setting | Value |
 |---------|-------|
 | X-axis | GCRS Hierarchy |
-| Y-axis | `[Total Clicks]` and `[Unique Users]` (grouped) |
-| Bar colors | `#404040` (Clicks), `#B8B3A2` (Users) |
+| Y-axis | `[Total Clicks]` and `[Unique Visitors]` (grouped) |
+| Bar colors | `#404040` (Clicks), `#B8B3A2` (Visitors) |
 | Drill mode | Enable drill-down (↓ icon in visual header) |
 | Top N | Optional: filter to Top 20 by `[Total Clicks]` |
 
 **Drill behavior**: Users click the drill-down arrow, then click a bar to drill into the next GCRS level. The breadcrumb appears automatically at the top of the visual.
 
-### 7.2 Region → Country Drilldown
+### 6.2 Region → Country Drilldown
 
 **Visual type**: Clustered bar chart with drill-down
 
@@ -526,11 +426,11 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 | Setting | Value |
 |---------|-------|
 | X-axis | Geography hierarchy |
-| Y-axis | `[Total Clicks]` and `[Unique Users]` (grouped) |
-| Bar colors | `#404040` (Clicks), `#B8B3A2` (Users) |
+| Y-axis | `[Total Clicks]` and `[Unique Visitors]` (grouped) |
+| Bar colors | `#404040` (Clicks), `#B8B3A2` (Visitors) |
 | Drill mode | Enable drill-down |
 
-### 7.3 Daily Users — Top 5 Divisions
+### 6.3 Daily Visitors — Top 5 Divisions
 
 **Visual type**: Line chart
 
@@ -539,14 +439,14 @@ This requires a Top N filter to show only the 5 most active divisions.
 | Setting | Value |
 |---------|-------|
 | X-axis | DateTable[Date] |
-| Y-axis | `[Unique Users]` |
+| Y-axis | `[Unique Visitors]` |
 | Legend | Events[hr_division] |
 
-**Top N filter**: Click on the visual → Filters pane → `hr_division` → Filter type: Top N → Top 5 by `[Unique Users]`.
+**Top N filter**: Click on the visual → Filters pane → `hr_division` → Filter type: Top N → Top 5 by `[Unique Visitors]`.
 
 Colors will auto-assign from the 20-color theme palette.
 
-### 7.4 Division Summary Table
+### 6.4 Division Summary Table
 
 **Visual type**: Table
 
@@ -554,10 +454,10 @@ Colors will auto-assign from the 20-color theme palette.
 |--------|---------------|
 | Division | Events[hr_division] |
 | Clicks | `[Total Clicks]` |
-| Users | `[Unique Users]` |
-| Clicks/User | `[Clicks per User]` |
+| Visitors | `[Unique Visitors]` |
+| Clicks/Visitor | `[Clicks per Visitor]` |
 | Stories | `[Unique Stories]` |
-| Reads | `[Reads]` |
+| Views | `[Views]` |
 | Likes | `[Likes]` |
 
 **Formatting**:
@@ -568,7 +468,7 @@ Colors will auto-assign from the 20-color theme palette.
 
 ---
 
-## 8. Page 3 — Stories
+## 7. Page 3 — Stories
 
 ### Layout
 
@@ -576,26 +476,26 @@ Colors will auto-assign from the 20-color theme palette.
 ┌─────────────────────────────────────────────────────────────────┐
 │  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
 ├─────────────────────────────────┬───────────────────────────────┤
-│  Top Stories by Reads (bar)     │  Top Stories by Readers (bar) │
+│  Top Stories by Views (bar)     │  Top Stories by Visitors (bar) │
 ├─────────────────────────────────┴───────────────────────────────┤
 │          Engagement Funnel — Top 10 Stories (grouped bar)       │
 ├─────────────────────────────────┬───────────────────────────────┤
 │  Division × Story Heatmap       │  Region × Story Heatmap       │
 ├─────────────────────────────────┴───────────────────────────────┤
-│         Daily Reads — Top 5 Stories (multi-line)                │
+│         Daily Views — Top 5 Stories (multi-line)                │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 8.1 Top Stories by Reads
+### 7.1 Top Stories by Views
 
 **Visual type**: Clustered bar chart (horizontal)
 
 | Setting | Value |
 |---------|-------|
 | Y-axis | Events[story_id] |
-| X-axis | `[Reads]` |
+| X-axis | `[Views]` |
 | Bar color | `#5A5D5C` |
-| Top N filter | Top 20 by `[Reads]` |
+| Top N filter | Top 20 by `[Views]` |
 | Data labels | On |
 | Sort | Descending by value |
 
@@ -614,12 +514,12 @@ IF(
 
 Use `Story Label` on the Y-axis. Filter out blanks (where story_id is null).
 
-### 8.2 Top Stories by Unique Readers
+### 7.2 Top Stories by Unique Visitors
 
 **Visual type**: Clustered bar chart (horizontal)
 
 ```dax
-Unique Readers =
+Unique Visitors =
 CALCULATE(
     DISTINCTCOUNT(Events[person_hash]),
     Events[action_type] = "Read"
@@ -629,29 +529,29 @@ CALCULATE(
 | Setting | Value |
 |---------|-------|
 | Y-axis | Story Label |
-| X-axis | `[Unique Readers]` |
+| X-axis | `[Unique Visitors]` |
 | Bar color | `#5A5D5C` |
-| Top N filter | Top 20 by `[Unique Readers]` |
+| Top N filter | Top 20 by `[Unique Visitors]` |
 | Data labels | On |
 
-### 8.3 Engagement Funnel — Top 10 Stories
+### 7.3 Engagement Funnel — Top 10 Stories
 
 **Visual type**: Clustered bar chart (vertical, grouped)
 
 | Setting | Value |
 |---------|-------|
 | X-axis | Story Label |
-| Y-axis | `[Reads]`, `[Likes]` |
-| Top N filter | Top 10 by `[Reads]` on story_id |
+| Y-axis | `[Views]`, `[Likes]` |
+| Top N filter | Top 10 by `[Views]` on story_id |
 | Legend | Measure names |
 
 Assign distinct colors from the chart palette to each measure series:
-- Reads → `#404040`
+- Views → `#404040`
 - Likes → `#6F7A1A`
 
 > **Alternative approach**: If having multiple measures on one axis is cumbersome, unpivot the action types into a single column using a DAX summary table. See the Appendix for the `StoryFunnel` table pattern.
 
-### 8.4 Division x Story Heatmap
+### 7.4 Division x Story Heatmap
 
 **Visual type**: Matrix
 
@@ -659,24 +559,24 @@ Assign distinct colors from the chart palette to each measure series:
 |---------|-------|
 | Rows | Events[hr_division] |
 | Columns | Story Label |
-| Values | `[Reads]` |
+| Values | `[Views]` |
 
 **Top N filters**:
 - Rows: Top 10 hr_division by `[Total Clicks]`
-- Columns: Top 10 story_id by `[Reads]`
+- Columns: Top 10 story_id by `[Views]`
 
 **Conditional formatting**: Same heatmap gradient as the Activity Heatmap (`#FFFFFF` → `#E4A911` → `#8A000A`).
 
-### 8.5 Region x Story Heatmap
+### 7.5 Region x Story Heatmap
 
 **Visual type**: Matrix — identical to Division heatmap but with `hr_region` on rows.
 
-### 8.6 Daily Reads — Top 5 Stories
+### 7.6 Daily Views — Top 5 Stories
 
 **Visual type**: Line chart
 
 ```dax
-Daily Reads =
+Daily Views =
 CALCULATE(
     COUNTROWS(Events),
     Events[action_type] = "Read"
@@ -686,13 +586,13 @@ CALCULATE(
 | Setting | Value |
 |---------|-------|
 | X-axis | DateTable[Date] |
-| Y-axis | `[Daily Reads]` |
+| Y-axis | `[Daily Views]` |
 | Legend | Story Label |
-| Top N filter | Top 5 story_id by `[Reads]` |
+| Top N filter | Top 5 story_id by `[Views]` |
 
 ---
 
-## 9. Page 4 — Data Completeness
+## 8. Page 4 — Data Completeness
 
 ### Layout
 
@@ -706,7 +606,7 @@ CALCULATE(
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 9.1 Organisational Data Coverage
+### 8.1 Organisational Data Coverage
 
 **Visual type**: Clustered bar chart (horizontal, 3 bars)
 
@@ -750,7 +650,7 @@ SWITCH(
 - User Known, No Org Data → `#E4A911` (RAG Amber)
 - Unknown User → `#CCCABC` (Light gray)
 
-### 9.2 Field Coverage Table
+### 8.2 Field Coverage Table
 
 **Visual type**: Table (or Matrix)
 
@@ -801,7 +701,7 @@ Field Coverage % = DIVIDE([Field Non-Null Count], [Total Clicks], 0) * 100
 
 ---
 
-## 10. Slicers & Cross-Filtering
+## 9. Slicers & Cross-Filtering
 
 ### Date Range Slicer
 
@@ -847,7 +747,7 @@ To control cross-filtering: select a visual → Format → Edit interactions →
 
 ---
 
-## 11. Appendix — Full DAX Reference
+## 10. Appendix — Full DAX Reference
 
 ### All Measures in One Block
 
@@ -858,14 +758,14 @@ To control cross-filtering: select a visual → Format → Edit interactions →
 
 Total Clicks = COUNTROWS(Events)
 
-Unique Users = DISTINCTCOUNT(Events[person_hash])
+Unique Visitors = DISTINCTCOUNT(Events[person_hash])
 
 Unique Sessions = DISTINCTCOUNT(Events[session_key])
 
 Unique Stories = DISTINCTCOUNT(Events[story_id])
 
-Clicks per User =
-DIVIDE([Total Clicks], [Unique Users], 0)
+Clicks per Visitor =
+DIVIDE([Total Clicks], [Unique Visitors], 0)
 
 Org Coverage % =
 DIVIDE(
@@ -879,7 +779,7 @@ DIVIDE(
 // ACTION TYPE COUNTS
 // ═══════════════════════════════════════════
 
-Reads = CALCULATE([Total Clicks], Events[action_type] = "Read")
+Views = CALCULATE([Total Clicks], Events[action_type] = "Read")
 
 Likes = CALCULATE([Total Clicks], Events[action_type] = "Like")
 
@@ -894,12 +794,12 @@ Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 // ENGAGEMENT METRICS
 // ═══════════════════════════════════════════
 
-Reads per User = DIVIDE([Reads], [Unique Users], 0)
+Views per Visitor = DIVIDE([Views], [Unique Visitors], 0)
 
-Unique Readers =
+Unique Visitors =
 CALCULATE(DISTINCTCOUNT(Events[person_hash]), Events[action_type] = "Read")
 
-Daily Reads =
+Daily Views =
 CALCULATE(COUNTROWS(Events), Events[action_type] = "Read")
 
 
@@ -1030,7 +930,7 @@ DATATABLE(
 )
 ```
 
-### Story Funnel (Alternative for Section 8.3)
+### Story Funnel (Alternative for Section 7.3)
 
 If placing multiple measures on a single bar chart is awkward, create a summary table:
 
@@ -1043,7 +943,7 @@ SUMMARIZECOLUMNS(
 )
 ```
 
-Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value in a stacked/grouped bar chart. Apply a Top N visual filter on `story_id` by `[Reads]`.
+Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value in a stacked/grouped bar chart. Apply a Top N visual filter on `story_id` by `[Views]`.
 
 ---
 
@@ -1055,12 +955,10 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 4. [ ] Set up relationships (Events → DateTable, Events → HourTable, Events → StoryMeta)
 4. [ ] Create `_Measures` table and paste all DAX measures
 5. [ ] Add calculated columns (Action Type Display, Story Label, etc.)
-6. [ ] Import `campaignwe-theme.json` (View → Themes → Browse)
-7. [ ] Build Page 1 (Overview) — KPIs, trend, hour/weekday bars, heatmap, doughnut
-8. [ ] Build Page 2 (Divisions & Regions) — GCRS hierarchy, region drilldown, table
-9. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
-10. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
-11. [ ] Add slicers (Date, Action Type, Link Type) to each page
-12. [ ] Configure cross-filter interactions between visuals
-13. [ ] Test drill-down on Division and Region charts
-14. [ ] Verify color palette matches corporate branding
+6. [ ] Build Page 1 (Overview) — KPIs, trend, hour/weekday bars, heatmap, doughnut
+7. [ ] Build Page 2 (Divisions & Regions) — GCRS hierarchy, region drilldown, table
+8. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
+9. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
+10. [ ] Add slicers (Date, Action Type, Link Type) to each page
+11. [ ] Configure cross-filter interactions between visuals
+12. [ ] Test drill-down on Division and Region charts

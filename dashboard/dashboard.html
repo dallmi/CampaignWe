@@ -256,7 +256,7 @@
                 <div class="kpi-grid" id="kpiGrid"></div>
                 <div class="charts-grid">
                     <div class="chart-card full-width">
-                        <div class="chart-title">Daily Activity <span class="chart-subtitle">Clicks & unique users over time (CET)</span></div>
+                        <div class="chart-title">Daily Activity <span class="chart-subtitle">Clicks & unique visitors over time (CET)</span></div>
                         <div class="chart-container tall"><canvas id="chartDailyTrends"></canvas></div>
                     </div>
                     <div class="chart-card">
@@ -310,11 +310,11 @@
             <div class="nav-content" id="tabStories">
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <div class="chart-title">Top Stories by Reads</div>
+                        <div class="chart-title">Top Stories by Views</div>
                         <div class="chart-container xtall"><canvas id="chartStoryReads"></canvas></div>
                     </div>
                     <div class="chart-card">
-                        <div class="chart-title">Top Stories by Unique Readers</div>
+                        <div class="chart-title">Top Stories by Unique Visitors</div>
                         <div class="chart-container xtall"><canvas id="chartStoryReaders"></canvas></div>
                     </div>
                     <div class="chart-card full-width" id="keyEngagementCard" style="display:none">
@@ -337,15 +337,15 @@
                         <div class="table-container" id="storyEngagementTable"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Reads: Division × Story</div>
+                        <div class="chart-title">Views: Division × Story</div>
                         <div class="table-container" id="divStoryHeatmap"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Reads: Region × Story</div>
+                        <div class="chart-title">Views: Region × Story</div>
                         <div class="table-container" id="regStoryHeatmap"></div>
                     </div>
                     <div class="chart-card full-width">
-                        <div class="chart-title">Daily Reads — Top 5 Stories</div>
+                        <div class="chart-title">Daily Views — Top 5 Stories</div>
                         <div class="chart-container tall"><canvas id="chartStoryDaily"></canvas></div>
                     </div>
                 </div>
@@ -577,7 +577,7 @@
             let r = 1;
             r = addSectionTitle(ws, r, 'Stories', 10); r++;
 
-            r = addSectionTitle(ws, r, 'Top Stories by Reads / Unique Readers');
+            r = addSectionTitle(ws, r, 'Top Stories by Views / Unique Visitors');
             const sideRow = r;
             addChartImage(wb, ws, 'storyReads', sideRow, 0, 5, 35);
             r = addChartImage(wb, ws, 'storyReaders', sideRow, 5, 10, 35);
@@ -596,7 +596,7 @@
 
             if (tableData.divStoryHeatmap) {
                 const cols = tableData.divStoryHeatmap.headers.length;
-                r = addSectionTitle(ws, r, 'Reads: Division × Story', cols);
+                r = addSectionTitle(ws, r, 'Views: Division × Story', cols);
                 r = addStyledTable(ws, r, tableData.divStoryHeatmap.headers, tableData.divStoryHeatmap.rows, {
                     isHeatmap: true, maxVal: tableData.divStoryHeatmap.maxVal,
                     rightAlign: [false, ...Array(cols - 1).fill(true)]
@@ -605,14 +605,14 @@
 
             if (tableData.regStoryHeatmap) {
                 const cols = tableData.regStoryHeatmap.headers.length;
-                r = addSectionTitle(ws, r, 'Reads: Region × Story', cols);
+                r = addSectionTitle(ws, r, 'Views: Region × Story', cols);
                 r = addStyledTable(ws, r, tableData.regStoryHeatmap.headers, tableData.regStoryHeatmap.rows, {
                     isHeatmap: true, maxVal: tableData.regStoryHeatmap.maxVal,
                     rightAlign: [false, ...Array(cols - 1).fill(true)]
                 });
             }
 
-            r = addSectionTitle(ws, r, 'Daily Reads — Top 5 Stories');
+            r = addSectionTitle(ws, r, 'Daily Views — Top 5 Stories');
             r = addChartImage(wb, ws, 'storyDaily', r, 0, 10, 20);
 
             autoSizeColumns(ws);
@@ -1211,19 +1211,19 @@
                 headers: ['Metric', 'Value'],
                 rows: [
                     ['Total Clicks', Number(d.events) || 0],
-                    ['Unique Users', Number(d.users) || 0],
+                    ['Unique Visitors', Number(d.users) || 0],
                     ['Sessions', Number(d.sessions) || 0],
                     ['Stories Viewed', Number(d.stories) || 0],
-                    ['Clicks / User', Number(d.events_per_user) || 0],
+                    ['Clicks / Visitor', Number(d.events_per_user) || 0],
                     ['HR Coverage %', Number(d.hr_pct) || 0],
                 ]
             };
             document.getElementById('kpiGrid').innerHTML = [
                 kpiCard('TOTAL CLICKS', fmtNum(d.events), 'highlight'),
-                kpiCard('UNIQUE USERS', fmtNum(d.users), 'info'),
+                kpiCard('UNIQUE VISITORS', fmtNum(d.users), 'info'),
                 kpiCard('SESSIONS', fmtNum(d.sessions), 'info'),
                 kpiCard('STORIES VIEWED', fmtNum(d.stories), 'success'),
-                kpiCard('CLICKS / USER', d.events_per_user ?? '-', 'warning'),
+                kpiCard('CLICKS / VISITOR', d.events_per_user ?? '-', 'warning'),
                 kpiCard('HR COVERAGE', (d.hr_pct ?? 0) + '%', 'info'),
             ].join('');
         }
@@ -1246,7 +1246,7 @@
                     labels: data.map(d => new Date(d.date)),
                     datasets: [
                         { label: 'Clicks', data: data.map(d => Number(d.events)), borderColor: COLORS.dark, backgroundColor: 'rgba(64,64,64,0.08)', fill: true, tension: 0.3, yAxisID: 'y' },
-                        { label: 'Unique Users', data: data.map(d => Number(d.users)), borderColor: '#B8B3A2', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.3, yAxisID: 'y1' }
+                        { label: 'Unique Visitors', data: data.map(d => Number(d.users)), borderColor: '#B8B3A2', backgroundColor: 'transparent', borderDash: [5, 5], tension: 0.3, yAxisID: 'y1' }
                     ]
                 },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top' } },
@@ -1416,7 +1416,7 @@
                     labels,
                     datasets: [
                         { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
-                        { label: 'Unique Users', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
                     ]
                 },
                 options: {
@@ -1504,7 +1504,7 @@
                     labels,
                     datasets: [
                         { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
-                        { label: 'Unique Users', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
                     ]
                 },
                 options: {
@@ -1573,7 +1573,7 @@
                 type: 'line',
                 data: { labels: dates.map(d => new Date(d)), datasets },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
-                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Unique Users' } } } }
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Unique Visitors' } } } }
             });
         }
 
@@ -1586,7 +1586,7 @@
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY events DESC
             `);
-            const headers = ['Division','Clicks','Users','Clicks/User','Stories','Reads','Likes'];
+            const headers = ['Division','Clicks','Visitors','Clicks/Visitor','Stories','Views','Likes'];
             const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes)]);
             const rightAlign = [false,true,true,true,true,true,true];
             tableData.divDepth = { headers, rows, rightAlign };
@@ -1681,8 +1681,8 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Reads', data: reads, backgroundColor: '#404040', borderRadius: 2 },
-                        { label: 'Unique Readers', data: readers, backgroundColor: '#B98E2C', borderRadius: 2 }
+                        { label: 'Views', data: reads, backgroundColor: '#404040', borderRadius: 2 },
+                        { label: 'Unique Visitors', data: readers, backgroundColor: '#B98E2C', borderRadius: 2 }
                     ]
                 },
                 options: {
@@ -1757,7 +1757,7 @@
                     <div style="width:110px;text-align:right;padding-right:12px;font-size:12px;font-weight:600;color:#404040;flex-shrink:0">${s.label}</div>
                     <div style="flex:1;display:flex;justify-content:center">
                         <div style="width:${widthPct}%;background:${s.color};color:#fff;text-align:center;padding:6px 0;border-radius:3px;font-size:12px;font-weight:500;min-width:60px;transition:width 0.3s ease">
-                            ${formatNumber(s.value)} users${conv}
+                            ${formatNumber(s.value)} visitors${conv}
                         </div>
                     </div>
                     <div style="width:110px;flex-shrink:0"></div>
@@ -1783,8 +1783,8 @@
                 GROUP BY story_id ORDER BY reads DESC
             `);
             const headers = hasKeys
-                ? ['Story', 'Keys', 'Reads', 'Unique Readers', 'Likes']
-                : ['Story', 'Reads', 'Unique Readers', 'Likes'];
+                ? ['Story', 'Keys', 'Views', 'Unique Visitors', 'Likes']
+                : ['Story', 'Views', 'Unique Visitors', 'Likes'];
             const rightAlign = hasKeys
                 ? [false, false, true, true, true]
                 : [false, true, true, true];
@@ -1899,7 +1899,7 @@
                 type: 'line',
                 data: { labels: dates.map(d => new Date(d)), datasets },
                 options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
-                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Reads' } } } }
+                    scales: { x: { type: 'time', time: { unit: 'day' } }, y: { beginAtZero: true, title: { display: true, text: 'Views' } } } }
             });
         }
 
