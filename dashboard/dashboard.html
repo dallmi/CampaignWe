@@ -248,7 +248,7 @@
                 <button class="nav-tab active" onclick="switchTab('tabOverview')">Overview</button>
                 <button class="nav-tab" onclick="switchTab('tabDivisions')">Divisions & Regions</button>
                 <button class="nav-tab" onclick="switchTab('tabStories')">Stories</button>
-                <button class="nav-tab" onclick="switchTab('tabQuality')">Data Quality</button>
+                <button class="nav-tab" onclick="switchTab('tabQuality')">Data Completeness</button>
             </div>
 
             <!-- TAB 1: Overview -->
@@ -348,23 +348,13 @@
                 </div>
             </div>
 
-            <!-- TAB 4: Data Quality -->
+            <!-- TAB 4: Data Completeness -->
             <div class="nav-content" id="tabQuality">
                 <div class="charts-grid">
                     <div class="chart-card">
-                        <div class="chart-title">GPN → HR Mapping Coverage</div>
+                        <div class="chart-title">Organisational Data Coverage</div>
                         <div class="chart-container"><canvas id="chartGpnCoverage"></canvas></div>
                     </div>
-                    <div class="chart-card">
-                        <div class="chart-title">GPN Length Distribution</div>
-                        <div class="chart-container"><canvas id="chartGpnLength"></canvas></div>
-                    </div>
-                </div>
-                <div class="chart-card full-width" style="margin-top: 1rem;">
-                    <div class="chart-title">
-                        Unmatched GPNs
-                    </div>
-                    <div class="table-container" id="unmatchedGpnTable"></div>
                 </div>
                 <div class="chart-card full-width" style="margin-top: 1rem;">
                     <div class="chart-title">Field Coverage
@@ -626,21 +616,12 @@
         }
 
         function buildDataQualitySheet(wb) {
-            const ws = wb.addWorksheet('Data Quality');
+            const ws = wb.addWorksheet('Data Completeness');
             let r = 1;
-            r = addSectionTitle(ws, r, 'Data Quality', 10); r++;
+            r = addSectionTitle(ws, r, 'Data Completeness', 10); r++;
 
-            r = addSectionTitle(ws, r, 'GPN Coverage / Length Distribution');
-            const sideRow = r;
-            addChartImage(wb, ws, 'gpnCoverage', sideRow, 0, 5, 15);
-            r = addChartImage(wb, ws, 'gpnLength', sideRow, 5, 10, 15);
-
-            if (tableData.unmatchedGpns) {
-                r = addSectionTitle(ws, r, 'Unmatched GPNs');
-                r = addStyledTable(ws, r, tableData.unmatchedGpns.headers, tableData.unmatchedGpns.rows, {
-                    rightAlign: [false, true, true, false, false, false]
-                });
-            }
+            r = addSectionTitle(ws, r, 'Organisational Data Coverage');
+            r = addChartImage(wb, ws, 'gpnCoverage', r, 0, 5, 15);
 
             if (tableData.fieldCoverage) {
                 r = addSectionTitle(ws, r, 'Field Coverage');
@@ -1164,7 +1145,7 @@
                     renderDivDaily, renderDivDepthTable,
                     renderStoryReads, renderStoryReaders, renderKeyEngagement, renderFunnel, renderCreationFunnel, renderStoryEngagement,
                     renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
-                    renderGpnCoverage, renderGpnLength, renderUnmatchedGpns, renderFieldCoverage
+                    renderGpnCoverage, renderFieldCoverage
                 ];
                 const results = await Promise.allSettled(tasks.map(fn => fn()));
                 const fails = results.filter(r => r.status === 'rejected');
@@ -1188,9 +1169,9 @@
         // =====================================================================
         async function renderKPIs() {
             const data = await q(`
-                SELECT COUNT(*) as events, COUNT(DISTINCT gpn) as users, COUNT(DISTINCT session_key) as sessions,
+                SELECT COUNT(*) as events, COUNT(DISTINCT person_hash) as users, COUNT(DISTINCT session_key) as sessions,
                        COUNT(DISTINCT story_id) as stories,
-                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
+                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as events_per_user,
                        ROUND(100.0 * CAST(SUM(CASE WHEN hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) / COUNT(*), 1) as hr_pct
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
@@ -1208,7 +1189,7 @@
             };
             document.getElementById('kpiGrid').innerHTML = [
                 kpiCard('TOTAL CLICKS', fmtNum(d.events), 'highlight'),
-                kpiCard('UNIQUE USERS', fmtNum(d.users), 'info', 'Distinct GPNs'),
+                kpiCard('UNIQUE USERS', fmtNum(d.users), 'info'),
                 kpiCard('SESSIONS', fmtNum(d.sessions), 'info'),
                 kpiCard('STORIES VIEWED', fmtNum(d.stories), 'success'),
                 kpiCard('CLICKS / USER', d.events_per_user ?? '-', 'warning'),
@@ -1222,7 +1203,7 @@
 
         async function renderDailyTrends() {
             const data = await q(`
-                SELECT session_date as date, COUNT(*) as events, COUNT(DISTINCT gpn) as users
+                SELECT session_date as date, COUNT(*) as events, COUNT(DISTINCT person_hash) as users
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
                 GROUP BY 1 ORDER BY 1
             `);
@@ -1383,7 +1364,7 @@
             }
 
             const data = await q(`
-                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT gpn) as users
+                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT person_hash) as users
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}${drillWhere}
                 GROUP BY 1 ORDER BY clicks DESC LIMIT 20
             `);
@@ -1472,7 +1453,7 @@
             }
 
             const data = await q(`
-                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT gpn) as users
+                SELECT COALESCE(${currentCol}, '(unknown)') as name, COUNT(*) as clicks, COUNT(DISTINCT person_hash) as users
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}${drillWhere}
                 GROUP BY 1 ORDER BY clicks DESC LIMIT 20
             `);
@@ -1538,13 +1519,13 @@
             const top5 = await q(`
                 SELECT COALESCE(hr_division, '(unknown)') as div FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL
-                GROUP BY 1 ORDER BY COUNT(DISTINCT gpn) DESC LIMIT 5
+                GROUP BY 1 ORDER BY COUNT(DISTINCT person_hash) DESC LIMIT 5
             `);
             const divNames = top5.map(d => d.div);
             if (divNames.length === 0) { destroyChart('divDaily'); return; }
 
             const data = await q(`
-                SELECT session_date as date, COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT gpn) as users FROM events
+                SELECT session_date as date, COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT person_hash) as users FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IN (${divNames.map(d => `'${d.replace(/'/g,"''")}'`).join(',')})
                 GROUP BY 1, 2 ORDER BY 1
             `);
@@ -1567,8 +1548,8 @@
 
         async function renderDivDepthTable() {
             const data = await q(`
-                SELECT COALESCE(hr_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT gpn) as users,
-                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT gpn), 0), 1) as events_per_user,
+                SELECT COALESCE(hr_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT person_hash) as users,
+                       ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as events_per_user,
                        COUNT(DISTINCT story_id) as stories,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
@@ -1618,7 +1599,7 @@
         async function renderStoryReaders() {
             const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
-                SELECT story_id${titleSelect}, COUNT(DISTINCT gpn) as readers FROM events
+                SELECT story_id${titleSelect}, COUNT(DISTINCT person_hash) as readers FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
                 GROUP BY story_id ORDER BY readers DESC LIMIT 20
             `);
@@ -1646,14 +1627,14 @@
             const data = await q(`
                 WITH exploded AS (
                     SELECT TRIM(unnest(string_split(story_keys, ','))) as key_value,
-                           action_type, gpn
+                           action_type, person_hash
                     FROM events
                     WHERE ${getDateWhere()}${getFilterWhere()} AND story_keys IS NOT NULL AND story_keys != ''
                 )
                 SELECT key_value,
                        CAST(COUNT(*) AS INTEGER) as total_events,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
-                       COUNT(DISTINCT gpn) as unique_readers,
+                       COUNT(DISTINCT person_hash) as unique_readers,
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM exploded
                 WHERE key_value != ''
@@ -1716,9 +1697,9 @@
         async function renderCreationFunnel() {
             const data = await q(`
                 SELECT
-                    COUNT(DISTINCT CASE WHEN action_type='Open Form' THEN gpn END) as openers,
-                    COUNT(DISTINCT CASE WHEN action_type='Submit' THEN gpn END) as submitters,
-                    COUNT(DISTINCT CASE WHEN action_type='Cancel' THEN gpn END) as cancellers
+                    COUNT(DISTINCT CASE WHEN action_type='Open Form' THEN person_hash END) as openers,
+                    COUNT(DISTINCT CASE WHEN action_type='Submit' THEN person_hash END) as submitters,
+                    COUNT(DISTINCT CASE WHEN action_type='Cancel' THEN person_hash END) as cancellers
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const row = data[0] || {};
@@ -1764,7 +1745,7 @@
             const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
                 SELECT story_id${titleSelect}${keysSelect},
-                       COUNT(DISTINCT gpn) as unique_readers,
+                       COUNT(DISTINCT person_hash) as unique_readers,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
@@ -1897,18 +1878,18 @@
         async function renderGpnCoverage() {
             const data = await q(`
                 SELECT
-                    CAST(SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) as matched,
-                    CAST(SUM(CASE WHEN gpn IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) AS INTEGER) as unmatched,
-                    CAST(SUM(CASE WHEN gpn IS NULL THEN 1 ELSE 0 END) AS INTEGER) as no_gpn
+                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) as matched,
+                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) AS INTEGER) as unmatched,
+                    CAST(SUM(CASE WHEN person_hash IS NULL THEN 1 ELSE 0 END) AS INTEGER) as no_user
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const d = data[0];
-            const covValues = [Number(d.matched), Number(d.unmatched), Number(d.no_gpn)];
+            const covValues = [Number(d.matched), Number(d.unmatched), Number(d.no_user)];
             const covPcts = pctArray(covValues);
             destroyChart('gpnCoverage');
             charts.gpnCoverage = new Chart(document.getElementById('chartGpnCoverage').getContext('2d'), {
                 type: 'bar',
-                data: { labels: ['HR Matched', 'GPN but no HR', 'No GPN'],
+                data: { labels: ['Org Data Available', 'User Known, No Org Data', 'Unknown User'],
                     datasets: [{ data: covValues, backgroundColor: [COLORS.success, COLORS.warning, COLORS.lightGray], borderRadius: 2 }] },
                 options: { responsive: true, maintainAspectRatio: false,
                     plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${covPcts[ctx.dataIndex]}%)` } } },
@@ -1917,40 +1898,8 @@
             });
         }
 
-        async function renderGpnLength() {
-            const data = await q(`
-                SELECT LENGTH(gpn) as len, COUNT(DISTINCT gpn) as cnt FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL GROUP BY 1 ORDER BY 1
-            `);
-            const lenValues = data.map(d => Number(d.cnt));
-            const lenPcts = pctArray(lenValues);
-            destroyChart('gpnLength');
-            charts.gpnLength = new Chart(document.getElementById('chartGpnLength').getContext('2d'), {
-                type: 'bar',
-                data: { labels: data.map(d => d.len + ' chars'), datasets: [{ data: lenValues, backgroundColor: '#5A5D5C', borderRadius: 2 }] },
-                options: { responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${formatNumber(ctx.raw)} (${lenPcts[ctx.dataIndex]}%)` } } },
-                    scales: { y: { beginAtZero: true, title: { display: true, text: 'Unique GPNs' } } } },
-                plugins: [barLabelPlugin(lenValues, lenPcts)]
-            });
-        }
-
-        async function renderUnmatchedGpns() {
-            const data = await q(`
-                SELECT gpn, COUNT(*) as events, COUNT(DISTINCT session_key) as sessions,
-                       MIN(session_date) as first_seen, MAX(session_date) as last_seen,
-                       ANY_VALUE(email) as sample_email
-                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND gpn IS NOT NULL AND hr_division IS NULL
-                GROUP BY gpn ORDER BY events DESC LIMIT 50
-            `);
-            const headers = ['GPN','Clicks','Sessions','First Seen','Last Seen','Sample Email'];
-            const rows = data.map(d => [d.gpn, Number(d.events), Number(d.sessions), String(d.first_seen).split('T')[0], String(d.last_seen).split('T')[0], d.sample_email || '']);
-            tableData.unmatchedGpns = { headers, rows, rightAlign: [false,true,true,false,false,false] };
-            document.getElementById('unmatchedGpnTable').innerHTML = rows.length ? renderHTMLTable(headers, rows, [false,true,true,false,false,false]) : '<p style="padding:1rem;color:var(--medium-gray)">No unmatched GPNs in selected range.</p>';
-        }
-
         async function renderFieldCoverage() {
-            const fields = ['gpn','email','session_id','user_id','story_id','action_type','hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function','hr_region','hr_country','hr_job_family','hr_management_level'];
+            const fields = ['person_hash','session_id','user_id','story_id','action_type','hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function','hr_region','hr_country','hr_job_family','hr_management_level'];
             // Check which fields exist
             let existingCols;
             try { existingCols = (await q("DESCRIBE events")).map(d => d.column_name); } catch(e) { existingCols = []; }
