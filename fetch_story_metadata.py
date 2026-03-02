@@ -35,11 +35,12 @@ ONEDRIVE_FILE_PATTERN = "We Are *.csv"
 # Column mapping: our_name -> SharePoint column name(s) to look for (case-insensitive)
 COLUMN_MAP = {
     "story_id": ["ID", "StoryID", "Story ID", "storyid", "story_id"],
-    "story_title": ["Story", "Title", "Story Title", "title", "story_title"],
+    "story_text": ["Story", "story_text"],
 }
 
 # Additional columns to include in the output (optional — won't fail if missing)
 EXTRA_COLUMNS = {
+    "story_title": ["Story Title", "StoryTitle", "Title", "title", "story_title"],
     "status_id": ["Status#Id", "StatusId", "Status_Id", "status#id"],
     "keys": ["*Keys"],  # suffix match — the only column ending in "Keys"
     "author_email": ["Email", "E-Mail", "email"],
@@ -193,8 +194,8 @@ def main():
             print(f"  Warning: optional column '{our_name}' not found (looked for {candidates})")
 
     # Build result with required + extra columns
-    src_cols = [mapped["story_id"], mapped["story_title"]]
-    dst_names = ["story_id", "story_title"]
+    src_cols = [mapped["story_id"], mapped["story_text"]]
+    dst_names = ["story_id", "story_text"]
     for our_name, src_col in extra_mapped.items():
         src_cols.append(src_col)
         dst_names.append(our_name)

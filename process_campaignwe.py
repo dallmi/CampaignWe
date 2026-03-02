@@ -401,7 +401,7 @@ def upsert_data(con, temp_table='temp_import'):
 
 def load_story_titles(con, story_titles_path):
     """
-    Load story_titles.parquet into DuckDB for story_id -> story_title lookup.
+    Load story_titles.parquet into DuckDB for story_id -> story_text lookup.
     Returns True if loaded successfully, False otherwise.
     """
     if not story_titles_path.exists():
@@ -952,11 +952,16 @@ def print_summary(con, output_dir=None):
 
         # Top stories by reads
         has_title = 'story_title' in events_cols
-        title_select = ", MAX(story_title) as story_title" if has_title else ""
+        has_text = 'story_text' in events_cols
+        label_select = ""
+        if has_title:
+            label_select = ", MAX(story_title) as story_title"
+        elif has_text:
+            label_select = ", MAX(story_text) as story_text"
         top_stories = con.execute(f"""
             SELECT
                 story_id
-                {title_select},
+                {label_select},
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(DISTINCT gpn) as unique_readers,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
@@ -969,10 +974,11 @@ def print_summary(con, output_dir=None):
 
         if len(top_stories) > 0:
             log("\n    Top stories by reads:")
-            if has_title:
+            if has_title or has_text:
+                label_col = 'story_title' if has_title else 'story_text'
                 log(f"    {'Story ID':<12s} {'Title':<30s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
                 for _, row in top_stories.iterrows():
-                    title = str(row['story_title'] or '')[:28]
+                    title = str(row[label_col] or '')[:28]
                     log(f"    {str(row['story_id']):<12s} {title:<30s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
             else:
                 log(f"    {'Story ID':<12s} {'Reads':>8s} {'Readers':>8s} {'Likes':>8s}")
@@ -1146,18 +1152,27 @@ def process_campaignwe(input_file=None, full_refresh=False):
     # Add calculated columns (with HR join if available)
     add_calculated_columns(con, has_hr_history=has_hr_history)
 
-    # Load story metadata for story_id -> story_title + keys lookup
+    # Load story metadata for story_id -> story_text/story_title + keys lookup
     has_story_titles = load_story_titles(con, story_titles_path)
     if has_story_titles:
         # Check which columns are available in story_titles
         st_cols = [r[0] for r in con.execute("DESCRIBE story_titles").fetchall()]
         has_keys = 'keys' in st_cols
 
-        con.execute("""
-            ALTER TABLE events ADD COLUMN IF NOT EXISTS story_title VARCHAR;
-            UPDATE events SET story_title = st.story_title
-            FROM story_titles st WHERE events.story_id = st.story_id;
-        """)
+        # Map story_text (full story body)
+        if 'story_text' in st_cols:
+            con.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS story_text VARCHAR;
+                UPDATE events SET story_text = st.story_text
+                FROM story_titles st WHERE events.story_id = st.story_id;
+            """)
+        # Map story_title (short title — added by dev team when available)
+        if 'story_title' in st_cols:
+            con.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS story_title VARCHAR;
+                UPDATE events SET story_title = st.story_title
+                FROM story_titles st WHERE events.story_id = st.story_id;
+            """)
         if has_keys:
             con.execute("""
                 ALTER TABLE events ADD COLUMN IF NOT EXISTS story_keys VARCHAR;
@@ -1166,13 +1181,13 @@ def process_campaignwe(input_file=None, full_refresh=False):
             """)
         matched = con.execute("""
             SELECT COUNT(DISTINCT story_id) FROM events
-            WHERE story_id IS NOT NULL AND story_title IS NOT NULL
+            WHERE story_id IS NOT NULL AND (story_text IS NOT NULL OR story_title IS NOT NULL)
         """).fetchone()[0]
         total = con.execute("""
             SELECT COUNT(DISTINCT story_id) FROM events
             WHERE story_id IS NOT NULL
         """).fetchone()[0]
-        log(f"  Matched {matched}/{total} story IDs to titles" +
+        log(f"  Matched {matched}/{total} story IDs to metadata" +
             (" (with keys)" if has_keys else ""))
 
     # Export Parquet files

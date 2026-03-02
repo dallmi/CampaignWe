@@ -8,6 +8,7 @@
 
     "columns": {
         "story_id": "StoryID",
-        "story_title": "Title"
+        "story_text": "Story",
+        "story_title": "Story Title"
     }
 }

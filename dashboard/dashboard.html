@@ -820,7 +820,7 @@
                         window._storyMeta = {};
                         metaRows.forEach(r => {
                             const email = r.author_email || r.email || null;
-                            window._storyMeta[String(r.story_id)] = { author_email: email, title: r.story_title || null };
+                            window._storyMeta[String(r.story_id)] = { author_email: email, story_title: r.story_title || null };
                         });
                         console.log('Story metadata loaded:', metaRows.length, 'stories. Columns:', metaRows.length > 0 ? Object.keys(metaRows[0]) : '(empty)');
                         console.log('Sample entry:', metaRows.length > 0 ? window._storyMeta[String(metaRows[0].story_id)] : '(none)');
@@ -973,10 +973,10 @@
 
         function storyLabel(d) {
             const meta = window._storyMeta && window._storyMeta[String(d.story_id)];
-            // Prefer author_email for concise labels; fall back to story_title, then Story {id}
-            if (meta && meta.author_email) return meta.author_email;
+            // Prefer story_title (when dev team adds it), then author_email, then Story {id}
+            if (meta && meta.story_title) return meta.story_title;
             if (d.story_title) return d.story_title;
-            if (meta && meta.title) return meta.title;
+            if (meta && meta.author_email) return meta.author_email;
             return 'Story ' + d.story_id;
         }
 
@@ -1584,9 +1584,17 @@
         // =====================================================================
         // TAB 3: STORIES
         // =====================================================================
+        // Check once if story_title column exists in events (added when dev team creates the field)
+        let _hasStoryTitle = null;
+        async function hasStoryTitle() {
+            if (_hasStoryTitle === null) _hasStoryTitle = (await q("DESCRIBE events")).some(d => d.column_name === 'story_title');
+            return _hasStoryTitle;
+        }
+
         async function renderStoryReads() {
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
-                SELECT story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads FROM events
+                SELECT story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL
                 GROUP BY story_id ORDER BY reads DESC LIMIT 20
             `);
@@ -1608,8 +1616,9 @@
         }
 
         async function renderStoryReaders() {
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
-                SELECT story_id, MAX(story_title) as story_title, COUNT(DISTINCT gpn) as readers FROM events
+                SELECT story_id${titleSelect}, COUNT(DISTINCT gpn) as readers FROM events
                 WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
                 GROUP BY story_id ORDER BY readers DESC LIMIT 20
             `);
@@ -1752,9 +1761,9 @@
         async function renderStoryEngagement() {
             const hasKeys = (await q("DESCRIBE events")).some(d => d.column_name === 'story_keys');
             const keysSelect = hasKeys ? ", MAX(story_keys) as story_keys" : "";
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
-                SELECT story_id, MAX(story_title) as story_title
-                       ${keysSelect},
+                SELECT story_id${titleSelect}${keysSelect},
                        COUNT(DISTINCT gpn) as unique_readers,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
@@ -1813,10 +1822,11 @@
         }
 
         async function renderDivStoryHeatmap() {
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10),
                      top_d AS (SELECT hr_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_division as div, story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                SELECT hr_division as div, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_division IN (SELECT * FROM top_d)
                 GROUP BY 1, 2
             `);
@@ -1833,9 +1843,10 @@
         }
 
         async function renderRegStoryHeatmap() {
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_region as reg, story_id, MAX(story_title) as story_title, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                SELECT hr_region as reg, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_region IS NOT NULL
                 GROUP BY 1, 2
             `);
@@ -1852,8 +1863,9 @@
         }
 
         async function renderStoryDaily() {
+            const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const top5 = await q(`
-                SELECT story_id, MAX(story_title) as story_title FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
+                SELECT story_id${titleSelect} FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read'
                 GROUP BY story_id ORDER BY COUNT(*) DESC LIMIT 5
             `);
             const sids = top5.map(d => d.story_id);

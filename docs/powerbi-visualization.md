@@ -31,7 +31,7 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
 | File | Grain | Description |
 |------|-------|-------------|
 | `events_anonymized.parquet` | One row per click event | Anonymised click data with organisational fields — primary source for all visuals |
-| `story_metadata.parquet` | One row per story | Story lookup table with title, author info, and keys |
+| `story_metadata.parquet` | One row per story | Story lookup table with story text, author info, and keys |
 
 ### Import Steps
 
@@ -599,7 +599,7 @@ Colors will auto-assign from the 20-color theme palette.
 | Data labels | On |
 | Sort | Descending by value |
 
-**Label formatting**: Create a calculated column that shows the story title when available, falls back to the author's email (from `StoryMeta`), and finally to "Story {id}":
+**Label formatting**: Create a calculated column that shows the story title when available (the dev team will add this field to the SharePoint list), falls back to the author's email, and finally to "Story {id}":
 
 ```dax
 Story Label =
@@ -971,7 +971,7 @@ IF(ISBLANK(Events[action_type]), "(null)", Events[action_type])
 Link Type Display =
 IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
 
-// Story Label: use story_title if available, then author_email from StoryMeta, then fallback to "Story {id}"
+// Story Label: use story_title if available (coming soon), then author_email, then fallback to "Story {id}"
 Story Label =
 IF(
     ISBLANK(Events[story_id]),
