@@ -409,7 +409,7 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 |---------|-------|
 | X-axis | GCRS Hierarchy |
 | Y-axis | `[Total Clicks]` and `[Unique Visitors]` (grouped) |
-| Bar colors | `#404040` (Clicks), `#B8B3A2` (Visitors) |
+| Bar colors | `#404040` (Clicks), `#B8B3A2` (Unique Visitors) |
 | Drill mode | Enable drill-down (↓ icon in visual header) |
 | Top N | Optional: filter to Top 20 by `[Total Clicks]` |
 
@@ -427,7 +427,7 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 |---------|-------|
 | X-axis | Geography hierarchy |
 | Y-axis | `[Total Clicks]` and `[Unique Visitors]` (grouped) |
-| Bar colors | `#404040` (Clicks), `#B8B3A2` (Visitors) |
+| Bar colors | `#404040` (Clicks), `#B8B3A2` (Unique Visitors) |
 | Drill mode | Enable drill-down |
 
 ### 6.3 Daily Visitors — Top 5 Divisions
@@ -454,7 +454,7 @@ Colors will auto-assign from the 20-color theme palette.
 |--------|---------------|
 | Division | Events[hr_division] |
 | Clicks | `[Total Clicks]` |
-| Visitors | `[Unique Visitors]` |
+| Unique Visitors | `[Unique Visitors]` |
 | Clicks/Visitor | `[Clicks per Visitor]` |
 | Stories | `[Unique Stories]` |
 | Views | `[Views]` |

@@ -1586,7 +1586,7 @@
                        CAST(SUM(CASE WHEN action_type='Like' THEN 1 ELSE 0 END) AS INTEGER) as likes
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()} GROUP BY 1 ORDER BY events DESC
             `);
-            const headers = ['Division','Clicks','Visitors','Clicks/Visitor','Stories','Views','Likes'];
+            const headers = ['Division','Clicks','Unique Visitors','Clicks/Visitor','Stories','Views','Likes'];
             const rows = data.map(d => [d.division, Number(d.events), Number(d.users), Number(d.events_per_user), Number(d.stories), Number(d.reads), Number(d.likes)]);
             const rightAlign = [false,true,true,true,true,true,true];
             tableData.divDepth = { headers, rows, rightAlign };
