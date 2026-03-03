@@ -19,7 +19,7 @@
             --primary:       #E60000;
             --primary-dark:  #8A000A;
             --exact-color:   #2E476B;
-            --hll-color:     #E60000;
+            --hll-color:     #00759E;
             --black:         #000000;
             --dark-gray:     #404040;
             --medium-gray:   #7A7870;
@@ -301,7 +301,7 @@
     const charts = {};
 
     const EXACT_COLOR = '#2E476B';
-    const HLL_COLOR   = '#E60000';
+    const HLL_COLOR   = '#00759E';
     const ERR_COLOR   = '#E4A911';
 
     function fmtNum(v) {
@@ -515,7 +515,7 @@
                     label: 'Error %',
                     data:  rows.map(r => +r.err_pct.toFixed(2)),
                     backgroundColor: rows.map(r =>
-                        r.err_pct <= 1.6 ? '#6F7A1A' : r.err_pct <= 5 ? '#E4A911' : '#E60000'),
+                        r.err_pct <= 1.6 ? '#6F7A1A' : r.err_pct <= 5 ? '#E4A911' : '#AD3E4A'),
                     borderRadius: 2
                 }]
             },
