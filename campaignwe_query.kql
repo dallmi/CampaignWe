@@ -177,6 +177,63 @@ AllData
 | order by ['timestamp [UTC]'] desc
 
 
+// --- QUERY G: Query F filtered to SEARCH events only ---
+// Same anonymized 4-level flattening as Query F, but restricted to events
+// where name starts with "SEARCH" (e.g. SEARCH_TRIGGERED, SEARCH_RESULT_CLICK).
+// Use this to inspect how search data comes through the combined pipeline.
+set truncationmaxrecords = 500000;
+let TimeRange = 90d;
+let CustomPropsPrefix = "CP_";
+let AllData = customEvents
+    | where timestamp >= ago(TimeRange)
+    | where name startswith "SEARCH"
+    | extend cd = todynamic(customDimensions)
+    | serialize
+    | extend rowId = row_number()
+    | extend CustomPropsRaw = tostring(cd.CustomProps)
+    | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+    | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
+    | extend cpKeys = bag_keys(CP)
+    | extend cpKeys = iff(array_length(cpKeys) == 0, dynamic(["__no_cp__"]), cpKeys)
+    | mv-expand cpKey = cpKeys to typeof(string)
+    | where cpKey != "Email"
+    | extend cpValue = iff(cpKey == "GPN", hash_sha256(tostring(CP[cpKey])), tostring(CP[cpKey]))
+    | extend isNestedL3 = cpKey != "__no_cp__" and isnotempty(cpValue) and cpValue startswith "{"
+    | extend L3Bag = iff(isNestedL3, coalesce(todynamic(cpValue), dynamic({})), dynamic({}))
+    | extend subKeys = bag_keys(L3Bag)
+    | extend subKeys = iff(array_length(subKeys) == 0, dynamic(["__no_sub__"]), subKeys)
+    | mv-expand subKey = subKeys to typeof(string)
+    | where not(isNestedL3 and subKey == "Email")
+    | extend subValue = iff(
+        subKey != "__no_sub__",
+        iff(subKey == "GPN", hash_sha256(tostring(L3Bag[subKey])), tostring(L3Bag[subKey])),
+        "")
+    | extend isNestedL4 = subKey != "__no_sub__" and isnotempty(subValue) and subValue startswith "{"
+    | extend L4Bag = iff(isNestedL4, coalesce(todynamic(subValue), dynamic({})), dynamic({}))
+    | extend subSubKeys = bag_keys(L4Bag)
+    | extend subSubKeys = iff(array_length(subSubKeys) == 0, dynamic(["__no_subsub__"]), subSubKeys)
+    | mv-expand subSubKey = subSubKeys to typeof(string)
+    | where not(isNestedL4 and subSubKey == "Email")
+    | extend kvBag = case(
+        cpKey == "__no_cp__", dynamic({}),
+        not(isNestedL3), pack(strcat(CustomPropsPrefix, cpKey), cpValue),
+        subKey == "__no_sub__", pack(strcat(CustomPropsPrefix, cpKey), cpValue),
+        not(isNestedL4), pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
+        subSubKey == "__no_subsub__", pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
+        pack(strcat(CustomPropsPrefix, cpKey, "_", subKey, "_", subSubKey),
+             iff(subSubKey == "GPN", hash_sha256(tostring(L4Bag[subSubKey])), tostring(L4Bag[subSubKey])))
+      )
+    | summarize take_any(timestamp), take_any(name), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
+    | extend finalBag = bag_merge(mainBag, coalesce(merged, dynamic({})));
+AllData
+| evaluate bag_unpack(finalBag)
+| project-away rowId, mainBag, merged
+| extend ['timestamp [UTC]'] = format_datetime(timestamp, 'dd/MM/yyyy HH:mm:ss.fffffff')
+| project-away timestamp
+| project-reorder ['timestamp [UTC]'], name, client_CountryOrRegion, user_Id, session_Id
+| order by ['timestamp [UTC]'] desc
+
+
 // --- QUERY E: Distinct hashed GPNs vs user_Ids (30 days) ---
 // Compares how many unique identifiers exist via each method.
 // Helps assess whether GPN-based hashing covers more or fewer users than App Insights user_Id.
