@@ -417,7 +417,7 @@ def aggregate_to_hll(con):
     sketches = []
     for gpns in df['gpns']:
         hll = HyperLogLog(p=12)
-        for gpn in (gpns or []):
+        for gpn in (gpns if gpns is not None else []):
             if gpn is not None:
                 hll.update(str(gpn).encode('utf-8'))
         sketches.append(pickle.dumps(hll))
