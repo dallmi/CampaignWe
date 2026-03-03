@@ -7,9 +7,11 @@ for the example.aspx page. It creates/updates a DuckDB database, joins with
 HR data from hr_history.parquet via GPN, and exports Parquet files for reporting.
 
 Usage:
-    python process_campaignwe.py                     # Process only new/changed files (delta)
-    python process_campaignwe.py input/export.xlsx   # Force-process a specific file
-    python process_campaignwe.py --full-refresh      # Delete DB and reprocess all files
+    python process_campaignwe.py                                # Process only new/changed files (delta)
+    python process_campaignwe.py input/export.xlsx              # Force-process a specific file
+    python process_campaignwe.py --full-refresh                 # Delete DB and reprocess all files
+    python process_campaignwe.py --delete-input                 # Delete each input file after processing
+    python process_campaignwe.py --full-refresh --delete-input  # Combine flags
 
 Input folder: input/
     Place your KQL export files here with date suffix _YYYY_MM_DD, e.g.:
@@ -1014,13 +1016,14 @@ def print_summary(con, output_dir=None):
     log("\n" + "=" * 64)
 
 
-def process_campaignwe(input_file=None, full_refresh=False):
+def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
     """
     Main processing function.
 
     Args:
-        input_file: Specific file to process, or None to auto-detect
+        input_file:   Specific file to process, or None to auto-detect
         full_refresh: If True, delete DB and reprocess all files
+        delete_input: If True, delete each input file after successful processing
     """
     script_dir = Path(__file__).parent
     input_dir = script_dir / 'input'
@@ -1067,8 +1070,9 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log(f"  Loaded {row_count:,} rows")
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
-            input_path.unlink()
-            log(f"  Deleted input file: {input_path.name}")
+            if delete_input:
+                input_path.unlink()
+                log(f"  Deleted input file: {input_path.name}")
 
     elif input_file:
         # Force-process a specific file (bypass delta check)
@@ -1117,8 +1121,9 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log(f"  Loaded {row_count:,} rows")
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
-            input_path.unlink()
-            log(f"  Deleted input file: {input_path.name}")
+            if delete_input:
+                input_path.unlink()
+                log(f"  Deleted input file: {input_path.name}")
 
     # # TEST DATA — uncomment to inject sample story events for flow validation
     # # Funnel shape: View Prompt (20) > Read (14) > Like (6) > Share (4) > Hide (2)
@@ -1264,6 +1269,7 @@ def process_campaignwe(input_file=None, full_refresh=False):
 
 if __name__ == "__main__":
     full_refresh = '--full-refresh' in sys.argv
+    delete_input = '--delete-input' in sys.argv
 
     input_file = None
     for arg in sys.argv[1:]:
@@ -1275,4 +1281,4 @@ if __name__ == "__main__":
         print(__doc__)
         print("\nNo arguments provided - processing new/changed files (delta mode)\n")
 
-    process_campaignwe(input_file=input_file, full_refresh=full_refresh)
+    process_campaignwe(input_file=input_file, full_refresh=full_refresh, delete_input=delete_input)
