@@ -25,6 +25,14 @@ Output:
                  event_count, uv_sketch (BLOB)
         No GPN, no email, no person_hash.
 
+    output/events_hll_uv.parquet
+        Single-dimension UV aggregates for the HTML comparison dashboard.
+
+    output/events_hll_powerbi.parquet
+        Pre-computed UV for all 32 combinations of:
+            month × story_id × action_type × hr_division × hr_region
+        Power BI fallback — no person_hash required.
+
 Pre-aggregation grain:
     session_date × story_id × action_type ×
     hr_division × hr_unit × hr_area × hr_sector × hr_region
@@ -41,6 +49,7 @@ import re
 import glob
 import hashlib
 import pickle
+import itertools
 import duckdb
 import pandas as pd
 import pyarrow as pa
@@ -500,6 +509,92 @@ def export_uv_aggregates(df, output_dir):
 
 
 # ---------------------------------------------------------------------------
+# Power BI fallback: all dimension-combination UV aggregates
+# ---------------------------------------------------------------------------
+
+# Dimensions included in the power-set pre-computation.
+# Reduced HR set (hr_division + hr_region only) keeps the combination count
+# manageable (2^5 = 32) while covering every Power BI slicer combination.
+_POWERBI_DIMS = ['month', 'story_id', 'action_type', 'hr_division', 'hr_region']
+
+
+def export_powerbi_aggregates(df, output_dir):
+    """Pre-compute HLL UV for every combination of the 5 Power BI dimensions.
+
+    Produces events_hll_powerbi.parquet — a fallback dataset for Power BI that
+    requires no person_hash column.  Each row carries pre-computed integer UV
+    estimates for one specific grouping of:
+        month, story_id, action_type, hr_division, hr_region
+
+    Schema:
+        month        VARCHAR  — "YYYY-MM" or NULL (dimension not in this grouping)
+        story_id     VARCHAR  — or NULL
+        action_type  VARCHAR  — or NULL
+        hr_division  VARCHAR  — or NULL
+        hr_region    VARCHAR  — or NULL
+        event_count  INTEGER  — exact event total for this cell
+        hll_uv       INTEGER  — HLL UV estimate (merged sketches)
+        grouping     VARCHAR  — comma-separated list of active dimensions
+
+    NULL in a dimension column means "aggregated across all values of that
+    dimension" (not "data had no value").  Use the `grouping` column in DAX
+    to identify which dimensions are active for a given row.
+
+    Power BI usage pattern:
+        UV Measure = CALCULATE(
+            SUMX(
+                FILTER(events_hll_powerbi,
+                    events_hll_powerbi[grouping] = <active-dim-combo>),
+                events_hll_powerbi[hll_uv]
+            )
+        )
+    """
+    log("Computing Power BI UV aggregates (all 32 dimension combinations)...")
+
+    df2 = df.copy()
+    df2['month'] = pd.to_datetime(df2['session_date']).dt.to_period('M').astype(str)
+
+    records = []
+    total_combos = 0
+
+    # Iterate over every subset of _POWERBI_DIMS (2^5 = 32 subsets)
+    for r in range(len(_POWERBI_DIMS) + 1):
+        for combo in itertools.combinations(_POWERBI_DIMS, r):
+            combo = list(combo)
+            total_combos += 1
+
+            if not combo:
+                # r=0 — overall total
+                uv  = _merge_sketches(df2['uv_sketch'])
+                evt = int(df2['event_count'].sum())
+                row = {d: None for d in _POWERBI_DIMS}
+                row.update({'event_count': evt, 'hll_uv': uv, 'grouping': '(overall)'})
+                records.append(row)
+                continue
+
+            for keys, grp in df2.groupby(combo, dropna=False):
+                if len(combo) == 1:
+                    keys = (keys,)
+                uv  = _merge_sketches(grp['uv_sketch'])
+                evt = int(grp['event_count'].sum())
+                row = {d: None for d in _POWERBI_DIMS}
+                for dim, val in zip(combo, keys):
+                    row[dim] = str(val) if pd.notna(val) else None
+                row['event_count'] = evt
+                row['hll_uv']      = uv
+                row['grouping']    = ','.join(combo)
+                records.append(row)
+
+    result   = pd.DataFrame(records)
+    out_path = output_dir / 'events_hll_powerbi.parquet'
+    result.to_parquet(str(out_path), index=False)
+    size_mb = os.path.getsize(out_path) / (1024 * 1024)
+    log(f"  events_hll_powerbi.parquet: {len(result):,} rows across {total_combos} "
+        f"groupings, {size_mb:.2f} MB")
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Comparison
 # ---------------------------------------------------------------------------
 
@@ -684,6 +779,7 @@ def process_campaignwe_hll(run_compare=False):
     log("\nExporting...")
     export_hll_parquet(df, output_dir)
     export_uv_aggregates(df, output_dir)
+    export_powerbi_aggregates(df, output_dir)
 
     log(f"\nDone. Output: {output_dir / 'events_hll.parquet'}")
 
