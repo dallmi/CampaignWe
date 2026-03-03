@@ -104,6 +104,79 @@ ClickData
 | order by ['timestamp [UTC]'] desc
 
 
+// --- QUERY F: Anonymized export - all events, all pages (click + search combined) ---
+// Extends Query C to cover ALL event types (click_event, SEARCH_TRIGGERED, etc.)
+// and ALL intranet pages (no PageURL filter).
+//
+// Uses 4-level nesting logic (from SearchAnalytics) to handle both:
+//   - click_event: flat CustomProps (L2 only)
+//   - search events: deeply nested CustomProps (L2 → L3 → L4)
+//
+// Anonymization applied at every nesting level:
+//   - Email key is dropped (L2, L3, L4)
+//   - GPN key is SHA-256 hashed (L2, L3, L4)
+//   - mainBag (non-CustomProps customDimensions keys) is passed through as-is
+set truncationmaxrecords = 500000;
+let TimeRange = 90d;
+let CustomPropsPrefix = "CP_";
+let AllData = customEvents
+    | where timestamp >= ago(TimeRange)
+    | extend cd = todynamic(customDimensions)
+    | serialize
+    | extend rowId = row_number()
+    // --- Level 1: Separate CustomProps from other customDimensions keys ---
+    | extend CustomPropsRaw = tostring(cd.CustomProps)
+    | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+    | extend mainBag = bag_remove_keys(cd, dynamic(["CustomProps"]))
+    // --- Level 2: Expand CustomProps keys; drop Email, hash GPN ---
+    | extend cpKeys = bag_keys(CP)
+    | extend cpKeys = iff(array_length(cpKeys) == 0, dynamic(["__no_cp__"]), cpKeys)
+    | mv-expand cpKey = cpKeys to typeof(string)
+    | where cpKey != "Email"
+    | extend cpValue = iff(cpKey == "GPN", hash_sha256(tostring(CP[cpKey])), tostring(CP[cpKey]))
+    // --- Level 3: Check if CP values contain nested JSON objects ---
+    | extend isNestedL3 = cpKey != "__no_cp__" and isnotempty(cpValue) and cpValue startswith "{"
+    | extend L3Bag = iff(isNestedL3, coalesce(todynamic(cpValue), dynamic({})), dynamic({}))
+    | extend subKeys = bag_keys(L3Bag)
+    | extend subKeys = iff(array_length(subKeys) == 0, dynamic(["__no_sub__"]), subKeys)
+    | mv-expand subKey = subKeys to typeof(string)
+    | where not(isNestedL3 and subKey == "Email")
+    | extend subValue = iff(
+        subKey != "__no_sub__",
+        iff(subKey == "GPN", hash_sha256(tostring(L3Bag[subKey])), tostring(L3Bag[subKey])),
+        "")
+    // --- Level 4: Check if Level 3 values contain nested JSON objects ---
+    | extend isNestedL4 = subKey != "__no_sub__" and isnotempty(subValue) and subValue startswith "{"
+    | extend L4Bag = iff(isNestedL4, coalesce(todynamic(subValue), dynamic({})), dynamic({}))
+    | extend subSubKeys = bag_keys(L4Bag)
+    | extend subSubKeys = iff(array_length(subSubKeys) == 0, dynamic(["__no_subsub__"]), subSubKeys)
+    | mv-expand subSubKey = subSubKeys to typeof(string)
+    | where not(isNestedL4 and subSubKey == "Email")
+    // --- Build flattened key-value pairs ---
+    // Flat L2 value:    CP_key          → value
+    // Nested L3 value:  CP_key_subKey   → value
+    // Nested L4 value:  CP_key_sub_sub  → value
+    | extend kvBag = case(
+        cpKey == "__no_cp__", dynamic({}),
+        not(isNestedL3), pack(strcat(CustomPropsPrefix, cpKey), cpValue),
+        subKey == "__no_sub__", pack(strcat(CustomPropsPrefix, cpKey), cpValue),
+        not(isNestedL4), pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
+        subSubKey == "__no_subsub__", pack(strcat(CustomPropsPrefix, cpKey, "_", subKey), subValue),
+        pack(strcat(CustomPropsPrefix, cpKey, "_", subKey, "_", subSubKey),
+             iff(subSubKey == "GPN", hash_sha256(tostring(L4Bag[subSubKey])), tostring(L4Bag[subSubKey])))
+      )
+    // --- Reaggregate back to one row per event ---
+    | summarize take_any(timestamp), take_any(name), take_any(client_CountryOrRegion), take_any(user_Id), take_any(session_Id), take_any(mainBag), merged = make_bag(kvBag) by rowId
+    | extend finalBag = bag_merge(mainBag, coalesce(merged, dynamic({})));
+AllData
+| evaluate bag_unpack(finalBag)
+| project-away rowId, mainBag, merged
+| extend ['timestamp [UTC]'] = format_datetime(timestamp, 'dd/MM/yyyy HH:mm:ss.fffffff')
+| project-away timestamp
+| project-reorder ['timestamp [UTC]'], name, client_CountryOrRegion, user_Id, session_Id
+| order by ['timestamp [UTC]'] desc
+
+
 // --- QUERY E: Distinct hashed GPNs vs user_Ids (30 days) ---
 // Compares how many unique identifiers exist via each method.
 // Helps assess whether GPN-based hashing covers more or fewer users than App Insights user_Id.
