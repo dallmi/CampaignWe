@@ -234,6 +234,67 @@ AllData
 | order by ['timestamp [UTC]'] desc
 
 
+// --- QUERY H: Truly anonymized SEARCH summary using HyperLogLog (HLL) ---
+// Unlike Query G (SHA-256 pseudonymization, still reversible via brute force),
+// this query produces AGGREGATE rows with HLL-estimated distinct user/session
+// counts — no individual event rows exist in the output.
+//
+// Why this is truly anonymous (not pseudonymous):
+//   - No GPN, no Email — both absent entirely
+//   - No individual rows: data is grouped by time bucket + search dimensions
+//   - user_Id and session_Id are replaced by HLL-estimated distinct counts
+//     (HLL has ~1-2% error margin, adding inherent noise on top)
+//   - A group row cannot be traced back to any individual
+//
+// Output format change vs Query G:
+//   Query G: one row per event (pseudonymized)
+//   Query H: one row per (day, event type, search dimensions) + estimated counts
+//
+// NOTE: queryText may itself contain personal data if users searched for names.
+//       Consider suppressing or generalising it if that is a concern.
+let TimeRange = 90d;
+customEvents
+| where timestamp >= ago(TimeRange)
+| where name startswith "SEARCH"
+| extend cd = todynamic(customDimensions)
+| extend CustomPropsRaw = tostring(cd.CustomProps)
+| extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+// --- Extract search dimensions (no GPN, no Email) ---
+| extend
+    deviceType    = tostring(CP.deviceType),
+    // queryText appears flat on SEARCH_TRIGGERED, nested inside searchQuery on other events
+    queryText     = coalesce(
+                        tostring(todynamic(tostring(CP.searchQuery)).queryText),
+                        tostring(CP.queryText)),
+    queryLanguage = tostring(todynamic(tostring(CP.searchQuery)).queryLanguage),
+    searchLatency = tostring(todynamic(tostring(CP.searchPerformance)).searchLatency),
+    clickedTAB    = tostring(todynamic(tostring(CP.searchResultsInteraction)).clickedTAB),
+    appliedFilter = tostring(todynamic(tostring(CP.searchResultsInteraction)).appliedFilter)
+// --- Aggregate into HLL sketches per day + dimension combination ---
+| summarize
+    EventCount   = count(),
+    UserHLL      = hll(user_Id),
+    SessionHLL   = hll(session_Id)
+    by
+    ['date [UTC]']         = bin(timestamp, 1d),
+    name,
+    client_CountryOrRegion,
+    deviceType,
+    queryText,
+    queryLanguage,
+    searchLatency,
+    clickedTAB,
+    appliedFilter
+// --- Decode HLL sketches into estimated distinct counts, then discard raw sketches ---
+| extend
+    EstimatedDistinctUsers    = dcount_hll(UserHLL),
+    EstimatedDistinctSessions = dcount_hll(SessionHLL)
+| project-away UserHLL, SessionHLL
+| extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
+| project-reorder ['date [UTC]'], name, client_CountryOrRegion, deviceType, queryText, queryLanguage, EventCount, EstimatedDistinctUsers, EstimatedDistinctSessions
+| order by ['date [UTC]'] desc
+
+
 // --- QUERY E: Distinct hashed GPNs vs user_Ids (30 days) ---
 // Compares how many unique identifiers exist via each method.
 // Helps assess whether GPN-based hashing covers more or fewer users than App Insights user_Id.
