@@ -20,9 +20,13 @@ Input folder: input/
     Overlapping time ranges are handled via upsert on the primary key.
 
 Output:
-    - data/campaignwe.db                (DuckDB database)
-    - output/events_raw.parquet         (all event-level data with HR fields)
-    - output/events_anonymized.parquet        (anonymized: GPNs hashed, emails dropped)
+    - data/campaignwe.db                (DuckDB database; events table contains person_hash, no plain GPN/email)
+    - output/events_anonymized.parquet  (GPN hashed as person_hash, email dropped; safe for reporting)
+
+PII handling:
+    Input files are deleted after successful processing.
+    GPN is hashed (SHA-256 -> person_hash) and email is dropped before any data is
+    written to disk, so no plain PII is ever stored in output files or the database.
 
 Primary Key: timestamp + user_id + session_id + name
     On conflict, the latest file's data takes precedence.
@@ -680,37 +684,30 @@ def add_calculated_columns(con, has_hr_history=False):
             log(f"    UTC: {utc_ts} (hour {int(row['utc_hour']):02d}) -> CET: {cet_ts} (hour {int(row['cet_hour']):02d}) | session_date: {row['session_date']}")
 
 
-def export_parquet_files(con, output_dir):
-    """Export all Parquet files for reporting."""
-    log("Exporting Parquet files...")
+def anonymize_events_table(con):
+    """Replace plain GPN/email in the events table with hashed/dropped values.
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    Called immediately after add_calculated_columns (HR join complete) so that
+    PII is never written to any output file or persisted in the database.
+    - gpn     -> person_hash  (SHA-256)
+    - CP_GPN  -> Person_Hash  (SHA-256)
+    - email   -> dropped
+    - CP_Email-> dropped
+    """
+    log("Anonymizing events table (hash GPN, drop email)...")
+    schema = con.execute("DESCRIBE events").df()
+    all_cols = schema['column_name'].tolist()
 
-    # Raw data export
-    raw_file = output_dir / 'events_raw.parquet'
-    if raw_file.exists():
-        raw_file.unlink()
-    con.execute(f"COPY events TO '{raw_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-    raw_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{raw_file}')").df()['n'][0]
-    raw_size = os.path.getsize(raw_file) / (1024 * 1024)
-    log(f"  events_raw.parquet ({raw_count:,} rows, {raw_size:.1f} MB)")
-
-    # Anonymized data export (hash GPNs, drop emails)
-    anonymized_file = output_dir / 'events_anonymized.parquet'
-    if anonymized_file.exists():
-        anonymized_file.unlink()
-
-    events_schema = con.execute("DESCRIBE events").df()
-    all_cols = events_schema['column_name'].tolist()
     hash_columns = {'gpn', 'CP_GPN'}
     drop_columns = {'email', 'CP_Email'}
 
     cols_to_hash = [c for c in all_cols if c in hash_columns]
     cols_to_drop = [c for c in all_cols if c in drop_columns]
-    cols_kept = [c for c in all_cols if c not in drop_columns]
 
     select_parts = []
-    for c in cols_kept:
+    for c in all_cols:
+        if c in drop_columns:
+            continue
         if c in hash_columns:
             alias = c.replace('gpn', 'person_hash').replace('GPN', 'Person_Hash')
             select_parts.append(f"sha256(CAST({c} AS VARCHAR))::VARCHAR AS {alias}")
@@ -718,17 +715,30 @@ def export_parquet_files(con, output_dir):
             select_parts.append(c)
 
     select_sql = ', '.join(select_parts)
-    con.execute(f"COPY (SELECT {select_sql} FROM events) TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+    con.execute(f"CREATE OR REPLACE TABLE events AS SELECT {select_sql} FROM events")
 
     changes = []
     if cols_to_hash:
         changes.append(f"hashed: {', '.join(cols_to_hash)}")
     if cols_to_drop:
         changes.append(f"dropped: {', '.join(cols_to_drop)}")
-    log(f"  events_anonymized.parquet ({raw_count:,} rows, {'; '.join(changes) or 'no changes'})")
+    log(f"  {'; '.join(changes) if changes else 'no PII columns found'}")
 
-    anonymized_size = os.path.getsize(anonymized_file) / (1024 * 1024)
-    log(f"  events_anonymized.parquet size: {anonymized_size:.1f} MB")
+
+def export_parquet_files(con, output_dir):
+    """Export all Parquet files for reporting."""
+    log("Exporting Parquet files...")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Anonymized export (GPN already hashed, email already dropped by anonymize_events_table)
+    anonymized_file = output_dir / 'events_anonymized.parquet'
+    if anonymized_file.exists():
+        anonymized_file.unlink()
+    con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+    row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
+    size_mb = os.path.getsize(anonymized_file) / (1024 * 1024)
+    log(f"  events_anonymized.parquet ({row_count:,} rows, {size_mb:.1f} MB)")
 
 
 def print_summary(con, output_dir=None):
@@ -783,7 +793,7 @@ def print_summary(con, output_dir=None):
             COUNT(*) as total_events,
             COUNT(DISTINCT user_id) as unique_users,
             COUNT(DISTINCT session_key) as unique_sessions,
-            COUNT(DISTINCT gpn) as unique_gpns
+            COUNT(DISTINCT person_hash) as unique_gpns
         FROM events
     """).df().iloc[0]
 
@@ -794,7 +804,7 @@ def print_summary(con, output_dir=None):
     log(f"    Total events:      {int(overview['total_events']):,}")
     log(f"    Unique users:      {int(overview['unique_users']):,}")
     log(f"    Unique sessions:   {int(overview['unique_sessions']):,}")
-    log(f"    Unique GPNs:       {int(overview['unique_gpns']):,}")
+    log(f"    Unique persons:    {int(overview['unique_gpns']):,}")
 
     # --- HR join coverage ---
     events_cols = con.execute("DESCRIBE events").df()['column_name'].tolist()
@@ -803,7 +813,7 @@ def print_summary(con, output_dir=None):
             SELECT
                 COUNT(*) as total,
                 COUNT(hr_division) as with_hr_data,
-                COUNT(gpn) as with_gpn
+                COUNT(person_hash) as with_gpn
             FROM events
         """).df().iloc[0]
 
@@ -813,7 +823,7 @@ def print_summary(con, output_dir=None):
 
         log("\n  HR JOIN COVERAGE")
         log("  " + "-" * 60)
-        log(f"    Events with GPN:       {with_gpn:>8,} / {total:,}  ({100.0 * with_gpn / total if total > 0 else 0:.1f}%)")
+        log(f"    Events with person hash:{with_gpn:>7,} / {total:,}  ({100.0 * with_gpn / total if total > 0 else 0:.1f}%)")
         log(f"    Events with HR data:   {with_hr:>8,} / {total:,}  ({100.0 * with_hr / total if total > 0 else 0:.1f}%)")
 
         if 'hr_division' in events_cols:
@@ -830,26 +840,26 @@ def print_summary(con, output_dir=None):
                 for _, row in divisions.iterrows():
                     log(f"      {str(row['hr_division']):<40s} {int(row['cnt']):>8,}")
 
-        # Show unmatched GPNs (have GPN but no HR data)
+        # Show unmatched persons (have person_hash but no HR data)
         if with_gpn > with_hr:
             unmatched = con.execute("""
-                SELECT gpn, COUNT(*) as cnt
+                SELECT person_hash, COUNT(*) as cnt
                 FROM events
-                WHERE gpn IS NOT NULL AND hr_division IS NULL
-                GROUP BY gpn
+                WHERE person_hash IS NOT NULL AND hr_division IS NULL
+                GROUP BY person_hash
                 ORDER BY cnt DESC
                 LIMIT 15
             """).df()
             if len(unmatched) > 0:
-                log(f"\n    Unmatched GPNs ({with_gpn - with_hr:,} events from {len(unmatched)} GPNs shown, may be more):")
+                log(f"\n    Unmatched persons ({with_gpn - with_hr:,} events from {len(unmatched)} shown, may be more):")
                 for _, row in unmatched.iterrows():
-                    log(f"      {row['gpn']:<12s} ({int(row['cnt']):,} events)")
+                    log(f"      {row['person_hash'][:16]}… ({int(row['cnt']):,} events)")
 
     # --- Field coverage ---
     log("\n  FIELD COVERAGE (non-null values)")
     log("  " + "-" * 60)
     total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-    check_fields = ['gpn', 'email', 'session_id', 'user_id', 'story_id', 'action_type']
+    check_fields = ['person_hash', 'session_id', 'user_id', 'story_id', 'action_type']
     # Add any HR fields
     for col in events_cols:
         if col.startswith('hr_'):
@@ -958,7 +968,7 @@ def print_summary(con, output_dir=None):
                 story_id
                 {title_select},
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-                COUNT(DISTINCT gpn) as unique_readers,
+                COUNT(DISTINCT person_hash) as unique_readers,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
             FROM events
             WHERE story_id IS NOT NULL AND story_id != ''
@@ -1057,6 +1067,8 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log(f"  Loaded {row_count:,} rows")
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
+            input_path.unlink()
+            log(f"  Deleted input file: {input_path.name}")
 
     elif input_file:
         # Force-process a specific file (bypass delta check)
@@ -1074,6 +1086,8 @@ def process_campaignwe(input_file=None, full_refresh=False):
         log(f"  Loaded {row_count:,} rows")
         upsert_data(con)
         record_processed_file(con, input_path, file_hash, row_count)
+        input_path.unlink()
+        log(f"  Deleted input file: {input_path.name}")
 
     else:
         # Default: delta mode — only process new or changed files
@@ -1103,6 +1117,8 @@ def process_campaignwe(input_file=None, full_refresh=False):
             log(f"  Loaded {row_count:,} rows")
             upsert_data(con)
             record_processed_file(con, input_path, file_hash, row_count)
+            input_path.unlink()
+            log(f"  Deleted input file: {input_path.name}")
 
     # # TEST DATA — uncomment to inject sample story events for flow validation
     # # Funnel shape: View Prompt (20) > Read (14) > Like (6) > Share (4) > Hide (2)
@@ -1167,6 +1183,9 @@ def process_campaignwe(input_file=None, full_refresh=False):
 
     # Add calculated columns (with HR join if available)
     add_calculated_columns(con, has_hr_history=has_hr_history)
+
+    # Anonymize: hash GPN -> person_hash, drop email (HR join already complete)
+    anonymize_events_table(con)
 
     # Load story metadata for story_id -> story_text/story_title + keys lookup
     has_story_titles = load_story_titles(con, story_titles_path)
@@ -1233,7 +1252,7 @@ def process_campaignwe(input_file=None, full_refresh=False):
     con.execute("VACUUM")
     con.execute("CHECKPOINT")
     db_size_after = os.path.getsize(db_path) / (1024 * 1024)
-    log(f"  Dropped hr_history and events_raw, vacuumed database")
+    log(f"  Dropped intermediate tables (hr_history, story_titles, events_raw), vacuumed database")
     log(f"  Database size: {db_size_before:.1f} MB -> {db_size_after:.1f} MB")
 
     log(f"\nDatabase: {db_path}")
