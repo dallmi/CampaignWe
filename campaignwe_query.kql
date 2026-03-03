@@ -295,6 +295,297 @@ customEvents
 | order by ['date [UTC]'] desc
 
 
+// ============================================================================
+// TRULY ANONYMIZED ANALYTICS — 4-QUERY PIPELINE (Queries I–L)
+// ============================================================================
+// All four queries use HyperLogLog (HLL) aggregation for true anonymization:
+//   - No GPN, no Email — both absent entirely from all output
+//   - No individual event rows — data is always grouped into aggregate rows
+//   - user_Id / session_Id replaced by HLL-estimated distinct counts
+//   - A result row cannot be traced back to any individual
+//
+// HLL accuracy: ~1–2 % error margin, adding inherent noise
+// GDPR: aggregate-only output with inherent noise qualifies as anonymised
+//       under GDPR Art. 4(1) / Recital 26 (no reasonable re-identification)
+//
+// NOTE: queryText in Queries J & K may contain personal data if users searched
+//       for people's names.  Consider suppressing low-frequency terms if needed.
+// ============================================================================
+
+
+// --- QUERY I: Daily aggregation — ALL events (click + video + search) ---
+// One aggregate row per (day × country × event-type × dimension combination).
+// Covers:
+//   click_event  → SiteName, PageName, ContentOwner, ContentType, PublishingDate,
+//                  Link_Type, FileType_Label, NewsCategory
+//   video events → identified by customDimensions has "Video_Action"
+//                  Video_Id, Video_Title, Video_Action, Video_Type, Video_Label, Video_Duration
+//   SEARCH*      → deviceType, queryLanguage, department
+//
+// Fields that don't exist for an event type will be empty strings in that row.
+// High-cardinality dimensions (PageName, Video_Id, PublishingDate) cause small
+// groups; HLL still shows an estimated count (e.g. "1") without revealing who.
+let TimeRange = 90d;
+customEvents
+| where timestamp >= ago(TimeRange)
+| extend cd = todynamic(customDimensions)
+| extend CustomPropsRaw = tostring(cd.CustomProps)
+| extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+// --- Parse nested L3 objects (present only on SEARCH events) ---
+| extend searchQuery_obj   = todynamic(tostring(CP.searchQuery))
+| extend userDetails_obj   = todynamic(tostring(CP.userDetails))
+// --- Click & Video dimensions (flat CP fields) ---
+| extend SiteName       = tostring(CP.SiteName)
+| extend PageName       = tostring(CP.PageName)
+| extend ContentOwner   = tostring(CP.ContentOwner)
+| extend ContentType    = tostring(CP.ContentType)
+| extend PublishingDate = tostring(CP.PublishingDate)
+| extend Link_Type      = tostring(CP.Link_Type)
+| extend FileType_Label = tostring(CP.FileType_Label)
+| extend NewsCategory   = tostring(CP.NewsCategory)
+// --- Video-specific dimensions ---
+| extend Video_Id       = tostring(CP.Video_Id)
+| extend Video_Title    = tostring(CP.Video_Title)
+| extend Video_Action   = tostring(CP.Video_Action)
+| extend Video_Type     = tostring(CP.Video_Type)
+| extend Video_Label    = tostring(CP.Video_Label)
+| extend Video_Duration = tostring(CP.Video_Duration)
+// --- Search-specific dimensions (nested; empty for click/video events) ---
+| extend deviceType     = tostring(CP.deviceType)
+| extend queryLanguage  = tostring(searchQuery_obj.queryLanguage)
+| extend department     = tostring(userDetails_obj.department)
+// --- Aggregate with HLL sketches ---
+| summarize
+    EventCount               = count(),
+    UserHLL                  = hll(user_Id),
+    SessionHLL               = hll(session_Id)
+    by
+    ['date [UTC]']           = bin(timestamp, 1d),
+    client_CountryOrRegion,
+    name,
+    SiteName,
+    PageName,
+    ContentOwner,
+    ContentType,
+    PublishingDate,
+    Link_Type,
+    FileType_Label,
+    NewsCategory,
+    Video_Id,
+    Video_Title,
+    Video_Action,
+    Video_Type,
+    Video_Label,
+    Video_Duration,
+    deviceType,
+    queryLanguage,
+    department
+// --- Decode HLL sketches ---
+| extend
+    EstimatedDistinctUsers    = dcount_hll(UserHLL),
+    EstimatedDistinctSessions = dcount_hll(SessionHLL)
+| project-away UserHLL, SessionHLL
+| extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
+| project-reorder
+    ['date [UTC]'], name, client_CountryOrRegion,
+    EventCount, EstimatedDistinctUsers, EstimatedDistinctSessions,
+    SiteName, PageName, ContentOwner, ContentType, PublishingDate,
+    Link_Type, FileType_Label, NewsCategory,
+    Video_Id, Video_Title, Video_Action, Video_Type, Video_Label, Video_Duration,
+    deviceType, queryLanguage, department
+| order by ['date [UTC]'] desc, name asc
+
+
+// --- QUERY J: Terms aggregation — SEARCH events only ---
+// One aggregate row per (day × country × search-term × search dimensions).
+// Shows search volume, term characteristics, performance metrics and department
+// breakdown.  Covers all SEARCH* event types.
+//
+// queryLengthChars / queryLengthWords: nested inside searchQuery object
+// searchLatency / searchAccuracy:      nested inside searchPerformance object
+// department:                          nested inside userDetails object
+let TimeRange = 90d;
+customEvents
+| where timestamp >= ago(TimeRange)
+| where name startswith "SEARCH"
+| extend cd = todynamic(customDimensions)
+| extend CustomPropsRaw = tostring(cd.CustomProps)
+| extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+// --- Parse nested L3 objects ---
+| extend searchQuery_obj  = todynamic(tostring(CP.searchQuery))
+| extend searchPerf_obj   = todynamic(tostring(CP.searchPerformance))
+| extend userDetails_obj  = todynamic(tostring(CP.userDetails))
+// --- Extract dimensions ---
+| extend
+    deviceType       = tostring(CP.deviceType),
+    // queryText: flat on SEARCH_TRIGGERED, nested on other SEARCH events
+    queryText        = coalesce(
+                           tostring(searchQuery_obj.queryText),
+                           tostring(CP.queryText)),
+    queryLanguage    = tostring(searchQuery_obj.queryLanguage),
+    queryLengthChars = tostring(searchQuery_obj.queryLengthChars),
+    queryLengthWords = tostring(searchQuery_obj.queryLengthWords),
+    searchLatency    = tostring(searchPerf_obj.searchLatency),
+    searchAccuracy   = tostring(searchPerf_obj.searchAccuracy),
+    department       = tostring(userDetails_obj.department)
+// --- Aggregate with HLL sketches ---
+| summarize
+    EventCount               = count(),
+    UserHLL                  = hll(user_Id),
+    SessionHLL               = hll(session_Id)
+    by
+    ['date [UTC]']           = bin(timestamp, 1d),
+    client_CountryOrRegion,
+    name,
+    deviceType,
+    queryText,
+    queryLanguage,
+    queryLengthChars,
+    queryLengthWords,
+    searchLatency,
+    searchAccuracy,
+    department
+// --- Decode HLL sketches ---
+| extend
+    EstimatedDistinctUsers    = dcount_hll(UserHLL),
+    EstimatedDistinctSessions = dcount_hll(SessionHLL)
+| project-away UserHLL, SessionHLL
+| extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
+| project-reorder
+    ['date [UTC]'], name, client_CountryOrRegion, deviceType,
+    queryText, queryLanguage, queryLengthChars, queryLengthWords,
+    searchLatency, searchAccuracy, department,
+    EventCount, EstimatedDistinctUsers, EstimatedDistinctSessions
+| order by ['date [UTC]'] desc, queryText asc
+
+
+// --- QUERY K: Terms + Clicks — SEARCH events with a result interaction ---
+// One aggregate row per (day × country × search-term × clicked-result combination).
+// Only rows where a result was actually clicked (clickedResult is non-empty).
+// Maps each search query to the specific result the user chose, together with
+// its rank (clickedPosition), the active tab/filter and the total result count.
+//
+// Use this to answer: "For query X, which result was clicked most often
+// and at what position?"
+let TimeRange = 90d;
+customEvents
+| where timestamp >= ago(TimeRange)
+| where name startswith "SEARCH"
+| extend cd = todynamic(customDimensions)
+| extend CustomPropsRaw = tostring(cd.CustomProps)
+| extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+// --- Parse nested L3 objects ---
+| extend searchQuery_obj    = todynamic(tostring(CP.searchQuery))
+| extend searchResults_obj  = todynamic(tostring(CP.searchResultsInteraction))
+// --- Extract dimensions ---
+| extend
+    deviceType       = tostring(CP.deviceType),
+    queryText        = coalesce(
+                           tostring(searchQuery_obj.queryText),
+                           tostring(CP.queryText)),
+    queryLanguage    = tostring(searchQuery_obj.queryLanguage),
+    clickedTAB       = tostring(searchResults_obj.clickedTAB),
+    appliedFilter    = tostring(searchResults_obj.appliedFilter),
+    clickedResult    = tostring(searchResults_obj.clickedResult),
+    clickedPosition  = tostring(searchResults_obj.clickedPosition),
+    totalResultCount = tostring(searchResults_obj.totalResultCount)
+// --- Only retain events where a result was actually clicked ---
+| where isnotempty(clickedResult)
+// --- Aggregate with HLL sketches ---
+| summarize
+    ClickCount               = count(),
+    UserHLL                  = hll(user_Id),
+    SessionHLL               = hll(session_Id)
+    by
+    ['date [UTC]']           = bin(timestamp, 1d),
+    client_CountryOrRegion,
+    name,
+    deviceType,
+    queryText,
+    queryLanguage,
+    clickedTAB,
+    appliedFilter,
+    clickedResult,
+    clickedPosition,
+    totalResultCount
+// --- Decode HLL sketches ---
+| extend
+    EstimatedDistinctUsers    = dcount_hll(UserHLL),
+    EstimatedDistinctSessions = dcount_hll(SessionHLL)
+| project-away UserHLL, SessionHLL
+| extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
+| project-reorder
+    ['date [UTC]'], name, client_CountryOrRegion, deviceType,
+    queryText, queryLanguage, clickedTAB, appliedFilter,
+    clickedResult, clickedPosition, totalResultCount,
+    ClickCount, EstimatedDistinctUsers, EstimatedDistinctSessions
+| order by ['date [UTC]'] desc, queryText asc, clickedPosition asc
+
+
+// --- QUERY L: Sessions — all events, session-level aggregation (session_Id dropped) ---
+// One row per session; session_Id is used only as an internal grouping key
+// and is dropped from the output.  No user_Id, no GPN, no Email.
+//
+// Each output row describes the behaviour of one anonymous session:
+//   date / country / deviceType   — contextual metadata
+//   TotalEvents                   — total number of events in the session
+//   SearchCount / ClickCount / VideoCount — event-type breakdown
+//   UniqueSearchTerms             — distinct search queries entered
+//   UniquePageViews               — distinct pages visited
+//   ResultClicks                  — number of search results clicked
+//   ApproxDurationMinutes         — time from first to last event (may be 0 for
+//                                   single-event sessions)
+//   SearchQueries                 — set of search terms used (may contain names;
+//                                   review before sharing externally)
+//
+// NOTE: No HLL needed here — session_Id is already the anonymous unit.
+//       UV counts would require HLL on user_Id; they are intentionally omitted
+//       to preserve the session-only scope of this file.
+let TimeRange = 90d;
+customEvents
+| where timestamp >= ago(TimeRange)
+| extend cd = todynamic(customDimensions)
+| extend CustomPropsRaw = tostring(cd.CustomProps)
+| extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
+// --- Parse nested objects (search events) ---
+| extend searchQuery_obj   = todynamic(tostring(CP.searchQuery))
+| extend searchResults_obj = todynamic(tostring(CP.searchResultsInteraction))
+// --- Classify and extract per-event fields ---
+| extend
+    isSearch      = name startswith "SEARCH",
+    isVideo       = customDimensions has "Video_Action",
+    queryText     = coalesce(
+                        tostring(searchQuery_obj.queryText),
+                        tostring(CP.queryText)),
+    clickedResult = tostring(searchResults_obj.clickedResult),
+    deviceType    = tostring(CP.deviceType),
+    PageName      = tostring(CP.PageName)
+// --- Aggregate per session (session_Id is grouping key only, dropped at end) ---
+| summarize
+    ['date [UTC]']         = bin(min(timestamp), 1d),
+    client_CountryOrRegion = take_any(client_CountryOrRegion),
+    deviceType             = take_any(deviceType),
+    TotalEvents            = count(),
+    SearchCount            = countif(isSearch),
+    VideoCount             = countif(isVideo),
+    ClickCount             = countif(not(isSearch) and not(isVideo)),
+    UniqueSearchTerms      = array_length(make_set_if(queryText,     isSearch and isnotempty(queryText))),
+    UniquePageViews        = array_length(make_set_if(PageName,      isnotempty(PageName))),
+    ResultClicks           = countif(isnotempty(clickedResult)),
+    ApproxDurationMinutes  = tolong((max(timestamp) - min(timestamp)) / 1m),
+    SearchQueries          = make_set_if(queryText, isSearch and isnotempty(queryText))
+    by session_Id
+// --- Drop session_Id: output contains no identifier ---
+| project-away session_Id
+| extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
+| project-reorder
+    ['date [UTC]'], client_CountryOrRegion, deviceType,
+    TotalEvents, SearchCount, ClickCount, VideoCount,
+    UniqueSearchTerms, UniquePageViews, ResultClicks,
+    ApproxDurationMinutes, SearchQueries
+| order by ['date [UTC]'] desc, TotalEvents desc
+
+
 // --- QUERY E: Distinct hashed GPNs vs user_Ids (30 days) ---
 // Compares how many unique identifiers exist via each method.
 // Helps assess whether GPN-based hashing covers more or fewer users than App Insights user_Id.
