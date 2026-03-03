@@ -309,7 +309,33 @@ customEvents
 //       under GDPR Art. 4(1) / Recital 26 (no reasonable re-identification)
 //
 // NOTE: queryText in Queries J & K may contain personal data if users searched
-//       for people's names.  Consider suppressing low-frequency terms if needed.
+//       for people's names.  Consider suppressing or generalising low-frequency
+//       terms if that is a concern.
+//
+// ── MINIMUM TRAFFIC THRESHOLD (k-anonymity) ─────────────────────────────────
+// Two reasons a minimum is needed:
+//
+//   1. HLL accuracy   — HLL has ~1–2 % *relative* error.  For large counts
+//      this is negligible.  For very small groups the relative error stays
+//      low but the absolute noise (±1–2 users) can be misleading.
+//
+//   2. Privacy / k-anonymity — if a dimension combination is rare enough that
+//      only one person triggered it (e.g. "query X from country Y on day Z"),
+//      HLL still returns "1" and the row is effectively a singleton.  Any
+//      observer with partial knowledge could re-identify that individual.
+//      This is the more important concern.
+//
+// Standard practice (Google Analytics, differential privacy literature):
+//   suppress rows where EstimatedDistinctUsers < k
+//   Typical values:  k = 5  (looser, good for internal use)
+//                    k = 10 (stricter, recommended for external sharing)
+//
+// All four queries share the MinUserThreshold let-variable below.
+// Query L uses MinSessionThreshold because it counts sessions, not users.
+// Set to 1 to disable suppression entirely (not recommended for sharing).
+// ─────────────────────────────────────────────────────────────────────────────
+let MinUserThreshold    = 5;   // suppress rows with fewer than 5 estimated distinct users
+let MinSessionThreshold = 5;   // suppress rows with fewer than 5 sessions (Query L)
 // ============================================================================
 
 
@@ -391,11 +417,12 @@ customEvents
     searchLatency, searchAccuracy,
     clickedTAB, appliedFilter, clickedPosition, resultTitle, resultUrl,
     department
-// --- Decode HLL sketches ---
+// --- Decode HLL sketches; suppress low-traffic rows (k-anonymity) ---
 | extend
     EstimatedDistinctUsers    = dcount_hll(UserHLL),
     EstimatedDistinctSessions = dcount_hll(SessionHLL)
 | project-away UserHLL, SessionHLL
+| where EstimatedDistinctUsers >= MinUserThreshold
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion,
@@ -468,11 +495,12 @@ customEvents
     clickedTAB,
     appliedFilter,
     department
-// --- Decode HLL sketches ---
+// --- Decode HLL sketches; suppress low-traffic rows (k-anonymity) ---
 | extend
     EstimatedDistinctUsers    = dcount_hll(UserHLL),
     EstimatedDistinctSessions = dcount_hll(SessionHLL)
 | project-away UserHLL, SessionHLL
+| where EstimatedDistinctUsers >= MinUserThreshold
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion, deviceType,
@@ -548,11 +576,12 @@ customEvents
     resultTitle,
     resultUrl,
     department
-// --- Decode HLL sketches ---
+// --- Decode HLL sketches; suppress low-traffic rows (k-anonymity) ---
 | extend
     EstimatedDistinctUsers    = dcount_hll(UserHLL),
     EstimatedDistinctSessions = dcount_hll(SessionHLL)
 | project-away UserHLL, SessionHLL
+| where EstimatedDistinctUsers >= MinUserThreshold
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion, deviceType,
@@ -676,7 +705,12 @@ customEvents
     SearchQueries          = make_set_if(queryText,       isSearch and isnotempty(queryText))
     by session_Id
 // --- Drop session_Id: output contains no identifier ---
+// NOTE: Query L rows are individual sessions, not HLL aggregates, so there is
+// no EstimatedDistinctUsers to filter on.  Instead suppress sessions with
+// fewer than MinSessionThreshold events, which removes bot hits and incomplete
+// single-ping sessions that could otherwise be rare enough to be identifying.
 | project-away session_Id
+| where TotalEvents >= MinSessionThreshold
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
     ['date [UTC]'], client_CountryOrRegion,
