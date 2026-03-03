@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campaign — HLL vs Exact UV Comparison</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <script type="module">
+        import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.28.0/+esm';
+        window.duckdb = duckdb;
+        window.dispatchEvent(new Event('duckdb-ready'));
+    </script>
+
+    <style>
+        :root {
+            --primary:       #E60000;
+            --primary-dark:  #8A000A;
+            --exact-color:   #2E476B;
+            --hll-color:     #E60000;
+            --black:         #000000;
+            --dark-gray:     #404040;
+            --medium-gray:   #7A7870;
+            --light-gray:    #CCCABC;
+            --lighter-gray:  #ECEBE4;
+            --row-alt:       #F8F7F2;
+            --white:         #FFFFFF;
+            --success:       #6F7A1A;
+            --success-light: #F0F2E6;
+            --warning:       #E4A911;
+            --warning-light: #FDF6E3;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--lighter-gray);
+            color: var(--dark-gray);
+            line-height: 1.5;
+        }
+
+        /* ── Header ── */
+        .header {
+            background: var(--white);
+            padding: 0.75rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--light-gray);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .header h1 {
+            font-size: 1.15rem;
+            font-weight: 600;
+            padding-left: 0.75rem;
+            border-left: 3px solid var(--primary);
+        }
+        .header-legend {
+            display: flex;
+            gap: 1.25rem;
+            align-items: center;
+            font-size: 0.8rem;
+            color: var(--medium-gray);
+        }
+        .legend-dot {
+            display: inline-block;
+            width: 12px; height: 12px;
+            border-radius: 2px;
+            margin-right: 0.35rem;
+            vertical-align: middle;
+        }
+        .status-indicator {
+            display: flex; align-items: center; gap: 0.5rem;
+            font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 4px;
+        }
+        .status-indicator.loading { color: var(--medium-gray); }
+        .status-indicator.success { color: var(--success); }
+        .status-indicator.error   { color: var(--primary); }
+
+        /* ── Loading / Error ── */
+        #loadingState {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            min-height: 60vh; gap: 1rem; color: var(--medium-gray);
+        }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid var(--light-gray);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        #loadingText { font-size: 0.9rem; }
+        .error-message {
+            background: #FFEBE6; border: 1px solid var(--primary);
+            border-radius: 6px; padding: 1rem 1.5rem;
+            color: var(--primary-dark); max-width: 480px; text-align: center;
+        }
+
+        /* ── KPI strip ── */
+        #dashboardContent { display: none; }
+        .kpi-strip {
+            display: flex; gap: 1rem; padding: 1rem 2rem;
+            background: var(--white); border-bottom: 1px solid var(--light-gray);
+            flex-wrap: wrap;
+        }
+        .kpi-card {
+            flex: 1; min-width: 140px;
+            padding: 0.75rem 1rem;
+            background: var(--lighter-gray);
+            border-radius: 6px; border-left: 3px solid var(--light-gray);
+        }
+        .kpi-card.exact  { border-color: var(--exact-color); }
+        .kpi-card.hll    { border-color: var(--hll-color); }
+        .kpi-card.good   { border-color: var(--success); }
+        .kpi-card.warn   { border-color: var(--warning); }
+        .kpi-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--medium-gray); margin-bottom: 0.25rem; }
+        .kpi-value { font-size: 1.35rem; font-weight: 700; color: var(--dark-gray); }
+        .kpi-sub   { font-size: 0.7rem; color: var(--medium-gray); margin-top: 0.15rem; }
+
+        /* ── Tabs ── */
+        .tabs {
+            display: flex; gap: 0; padding: 0 2rem;
+            background: var(--white);
+            border-bottom: 2px solid var(--light-gray);
+        }
+        .tab-btn {
+            padding: 0.65rem 1.25rem;
+            background: none; border: none; border-bottom: 3px solid transparent;
+            margin-bottom: -2px; cursor: pointer;
+            font-size: 0.875rem; font-weight: 500; color: var(--medium-gray);
+            transition: all 0.15s;
+        }
+        .tab-btn:hover { color: var(--dark-gray); }
+        .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-panel { display: none; padding: 1.5rem 2rem; }
+        .tab-panel.active { display: block; }
+
+        /* ── Chart panels ── */
+        .panel {
+            background: var(--white); border-radius: 8px;
+            padding: 1.25rem; margin-bottom: 1.25rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+        }
+        .panel-title {
+            font-size: 0.8rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: 0.05em; color: var(--medium-gray); margin-bottom: 1rem;
+        }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; }
+        .chart-wrap { position: relative; height: 320px; }
+        .chart-wrap.tall { height: 400px; }
+
+        /* ── Tables ── */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+        thead th {
+            background: var(--lighter-gray); padding: 0.5rem 0.75rem;
+            text-align: left; font-weight: 600; font-size: 0.75rem;
+            text-transform: uppercase; letter-spacing: 0.04em;
+            color: var(--medium-gray); white-space: nowrap;
+            position: sticky; top: 0;
+        }
+        thead th.r { text-align: right; }
+        tbody tr:nth-child(even) { background: var(--row-alt); }
+        tbody td { padding: 0.4rem 0.75rem; border-top: 1px solid var(--lighter-gray); }
+        tbody td.r { text-align: right; font-variant-numeric: tabular-nums; }
+        .err-low  { color: var(--success);      font-weight: 600; }
+        .err-mid  { color: var(--warning);      font-weight: 600; }
+        .err-high { color: var(--primary-dark); font-weight: 600; }
+
+        /* ── Info note ── */
+        .info-note {
+            background: var(--warning-light); border: 1px solid var(--warning);
+            border-radius: 6px; padding: 0.6rem 1rem;
+            font-size: 0.78rem; color: var(--dark-gray); margin-bottom: 1rem;
+        }
+
+        @media (max-width: 900px) {
+            .two-col { grid-template-columns: 1fr; }
+            .kpi-strip { padding: 1rem; }
+            .tabs { padding: 0 1rem; }
+            .tab-panel { padding: 1rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>HLL vs Exact UV — Comparison Dashboard</h1>
+    <div style="display:flex;align-items:center;gap:1.5rem">
+        <div class="header-legend">
+            <span><span class="legend-dot" style="background:var(--exact-color)"></span>Exact (person_hash)</span>
+            <span><span class="legend-dot" style="background:var(--hll-color)"></span>HLL estimate</span>
+        </div>
+        <div class="status-indicator loading" id="statusIndicator">
+            <span id="statusText">Loading…</span>
+        </div>
+    </div>
+</div>
+
+<div id="loadingState">
+    <div class="spinner"></div>
+    <div id="loadingText">Initializing DuckDB…</div>
+</div>
+
+<div id="dashboardContent">
+
+    <!-- KPI strip -->
+    <div class="kpi-strip" id="kpiStrip">
+        <div class="kpi-card exact"><div class="kpi-label">Exact Total UV</div><div class="kpi-value" id="kpiExact">—</div><div class="kpi-sub">COUNT(DISTINCT person_hash)</div></div>
+        <div class="kpi-card hll"><div class="kpi-label">HLL Total UV</div><div class="kpi-value" id="kpiHll">—</div><div class="kpi-sub">HyperLogLog estimate (p=12)</div></div>
+        <div class="kpi-card" id="kpiErrCard"><div class="kpi-label">Overall Error</div><div class="kpi-value" id="kpiErr">—</div><div class="kpi-sub">|exact − HLL| / exact</div></div>
+        <div class="kpi-card"><div class="kpi-label">Total Events</div><div class="kpi-value" id="kpiEvents">—</div><div class="kpi-sub">deduplicated clicks</div></div>
+        <div class="kpi-card"><div class="kpi-label">HLL Error Bound</div><div class="kpi-value">±1.6%</div><div class="kpi-sub">p=12 theoretical std dev</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('division', this)">Division</button>
+        <button class="tab-btn" onclick="switchTab('region', this)">Region</button>
+        <button class="tab-btn" onclick="switchTab('story', this)">Story</button>
+        <button class="tab-btn" onclick="switchTab('trend', this)">Monthly Trend</button>
+    </div>
+
+    <!-- Division tab -->
+    <div class="tab-panel active" id="tab-division">
+        <div class="info-note">UV counts per business division. Exact = <code>COUNT(DISTINCT person_hash)</code> from events_anonymized.parquet &nbsp;|&nbsp; HLL = pre-aggregated sketch estimate from events_hll_uv.parquet.</div>
+        <div class="two-col">
+            <div class="panel">
+                <div class="panel-title">Unique Visitors by Division</div>
+                <div class="chart-wrap tall"><canvas id="chartDivision"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">Error % by Division</div>
+                <div class="chart-wrap tall"><canvas id="chartDivisionErr"></canvas></div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Division detail</div>
+            <div class="table-wrap" id="tableDivision"></div>
+        </div>
+    </div>
+
+    <!-- Region tab -->
+    <div class="tab-panel" id="tab-region">
+        <div class="info-note">UV counts per HR region. Same comparison methodology as Division.</div>
+        <div class="two-col">
+            <div class="panel">
+                <div class="panel-title">Unique Visitors by Region</div>
+                <div class="chart-wrap tall"><canvas id="chartRegion"></canvas></div>
+            </div>
+            <div class="panel">
+                <div class="panel-title">Error % by Region</div>
+                <div class="chart-wrap tall"><canvas id="chartRegionErr"></canvas></div>
+            </div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Region detail</div>
+            <div class="table-wrap" id="tableRegion"></div>
+        </div>
+    </div>
+
+    <!-- Story tab -->
+    <div class="tab-panel" id="tab-story">
+        <div class="info-note">Unique readers per story (top 20 by exact UV). HLL sketch is merged across all days and HR dimensions for each story.</div>
+        <div class="panel">
+            <div class="panel-title">Unique Readers by Story (top 20)</div>
+            <div class="chart-wrap tall"><canvas id="chartStory"></canvas></div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Story detail</div>
+            <div class="table-wrap" id="tableStory"></div>
+        </div>
+    </div>
+
+    <!-- Monthly trend tab -->
+    <div class="tab-panel" id="tab-trend">
+        <div class="info-note"><strong>Note:</strong> Monthly UV counts are <em>not</em> cumulative — they represent unique persons active in each month. The same person in two months appears twice. HLL error is expected to be higher here because each month's sketch is built from a smaller population.</div>
+        <div class="panel">
+            <div class="panel-title">UV Active Per Month</div>
+            <div class="chart-wrap"><canvas id="chartTrend"></canvas></div>
+        </div>
+        <div class="panel">
+            <div class="panel-title">Monthly detail</div>
+            <div class="table-wrap" id="tableTrend"></div>
+        </div>
+    </div>
+
+</div><!-- /dashboardContent -->
+
+<script>
+    // =========================================================================
+    // State
+    // =========================================================================
+    let db, conn;
+    const charts = {};
+
+    const EXACT_COLOR = '#2E476B';
+    const HLL_COLOR   = '#E60000';
+    const ERR_COLOR   = '#E4A911';
+
+    function fmtNum(v) {
+        if (v == null || isNaN(v)) return '—';
+        return Number(v).toLocaleString('en-US');
+    }
+    function fmtPct(v) {
+        if (v == null || isNaN(v)) return '—';
+        return Number(v).toFixed(2) + '%';
+    }
+    function errClass(pct) {
+        if (pct <= 1.6) return 'err-low';
+        if (pct <= 5)   return 'err-mid';
+        return 'err-high';
+    }
+
+    function setLoadingText(t) { document.getElementById('loadingText').textContent = t; }
+    function updateStatus(cls, t) {
+        const el = document.getElementById('statusIndicator');
+        el.className = 'status-indicator ' + cls;
+        document.getElementById('statusText').textContent = t;
+    }
+
+    function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+    // =========================================================================
+    // Tab switching
+    // =========================================================================
+    function switchTab(name, btn) {
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        btn.classList.add('active');
+        renderTab(name);
+    }
+    window.switchTab = switchTab;
+
+    // =========================================================================
+    // DuckDB query helper
+    // =========================================================================
+    async function q(sql) {
+        const result = await conn.query(sql);
+        return result.toArray().map(r => Object.fromEntries(
+            Object.entries(r).map(([k, v]) => [k, v instanceof BigInt ? Number(v) : v])
+        ));
+    }
+
+    // =========================================================================
+    // INIT
+    // =========================================================================
+    async function init() {
+        try {
+            updateStatus('loading', 'Waiting for DuckDB…');
+            if (!window.duckdb) {
+                await Promise.race([
+                    new Promise(r => window.addEventListener('duckdb-ready', r, { once: true })),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('DuckDB failed to load after 30s.')), 30000))
+                ]);
+            }
+
+            setLoadingText('Initializing DuckDB…');
+            const m = window.duckdb;
+            const bundles = m.getJsDelivrBundles();
+            const bundle  = await m.selectBundle(bundles);
+            const wurl = URL.createObjectURL(new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' }));
+            const worker = new Worker(wurl);
+            db = new m.AsyncDuckDB(new m.ConsoleLogger(), worker);
+            await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+            URL.revokeObjectURL(wurl);
+            conn = await db.connect();
+
+            setLoadingText('Loading parquet files…');
+            await loadParquetFiles();
+
+            document.getElementById('loadingState').style.display  = 'none';
+            document.getElementById('dashboardContent').style.display = 'block';
+            updateStatus('success', 'Ready');
+
+            await renderKPIs();
+            await renderTab('division');
+
+        } catch (err) {
+            console.error(err);
+            document.getElementById('loadingState').innerHTML =
+                `<div class="error-message"><strong>Failed to load:</strong><br>${err.message}<br><br>
+                Make sure events_anonymized.parquet and events_hll_uv.parquet are in the output/ folder
+                and that you are serving this file via a local web server.</div>`;
+            updateStatus('error', 'Error');
+        }
+    }
+
+    async function loadParquetFiles() {
+        const base  = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+        const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+
+        async function load(view, file, msg) {
+            for (const p of paths) {
+                try {
+                    await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${p}${file}')`);
+                    setLoadingText(msg);
+                    return;
+                } catch(e) { /* try next path */ }
+            }
+            throw new Error(`Could not find ${file}. Run process_campaignwe.py and process_campaignwe_hll.py first.`);
+        }
+
+        await load('anon',   'events_anonymized.parquet', 'Loaded events_anonymized.parquet…');
+        await load('hll_uv', 'events_hll_uv.parquet',     'Loaded events_hll_uv.parquet…');
+    }
+
+    // =========================================================================
+    // KPI strip
+    // =========================================================================
+    async function renderKPIs() {
+        const exact = await q(`SELECT COUNT(DISTINCT person_hash) as uv, COUNT(*) as evts FROM anon`);
+        const hll   = await q(`SELECT hll_uv, event_count FROM hll_uv WHERE dimension = 'overall' AND value = 'total'`);
+
+        const exactUV  = Number(exact[0]?.uv  || 0);
+        const hllUV    = Number(hll[0]?.hll_uv || 0);
+        const evts     = Number(exact[0]?.evts  || 0);
+        const errPct   = exactUV > 0 ? Math.abs(exactUV - hllUV) / exactUV * 100 : 0;
+
+        document.getElementById('kpiExact').textContent  = fmtNum(exactUV);
+        document.getElementById('kpiHll').textContent    = fmtNum(hllUV);
+        document.getElementById('kpiEvents').textContent = fmtNum(evts);
+        document.getElementById('kpiErr').textContent    = fmtPct(errPct);
+
+        const errCard = document.getElementById('kpiErrCard');
+        errCard.classList.remove('good', 'warn', 'hll');
+        errCard.classList.add(errPct <= 1.6 ? 'good' : errPct <= 5 ? 'warn' : 'hll');
+    }
+
+    // =========================================================================
+    // Tab router
+    // =========================================================================
+    async function renderTab(name) {
+        if (name === 'division') await renderDimension('hr_division', 'Division', 'chartDivision', 'chartDivisionErr', 'tableDivision', 25);
+        if (name === 'region')   await renderDimension('hr_region',   'Region',   'chartRegion',   'chartRegionErr',   'tableRegion',   50);
+        if (name === 'story')    await renderStory();
+        if (name === 'trend')    await renderTrend();
+    }
+
+    // =========================================================================
+    // Generic dimension comparison renderer
+    // =========================================================================
+    async function renderDimension(dim, label, chartId, errChartId, tableId, limit) {
+        // Exact UV from events_anonymized.parquet
+        const exactRows = await q(`
+            SELECT ${dim} as value,
+                   COUNT(DISTINCT person_hash) as exact_uv,
+                   COUNT(*) as events
+            FROM anon
+            WHERE ${dim} IS NOT NULL
+            GROUP BY ${dim}
+            ORDER BY exact_uv DESC
+            LIMIT ${limit}
+        `);
+
+        // HLL UV from events_hll_uv.parquet
+        const hllRows = await q(`
+            SELECT value, hll_uv
+            FROM hll_uv
+            WHERE dimension = '${dim}' AND value IS NOT NULL
+        `);
+        const hllMap = {};
+        hllRows.forEach(r => { hllMap[r.value] = Number(r.hll_uv); });
+
+        // Merge
+        const rows = exactRows.map(r => ({
+            value:    r.value,
+            exact_uv: Number(r.exact_uv),
+            hll_uv:   hllMap[r.value] ?? 0,
+            events:   Number(r.events),
+        })).map(r => ({
+            ...r,
+            delta:   Math.abs(r.exact_uv - r.hll_uv),
+            err_pct: r.exact_uv > 0 ? Math.abs(r.exact_uv - r.hll_uv) / r.exact_uv * 100 : 0,
+        }));
+
+        const labels = rows.map(r => truncate(r.value, 28));
+
+        // Grouped bar — Exact vs HLL
+        destroyChart(chartId);
+        charts[chartId] = new Chart(document.getElementById(chartId).getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { label: 'Exact UV', data: rows.map(r => r.exact_uv), backgroundColor: EXACT_COLOR, borderRadius: 2 },
+                    { label: 'HLL UV',   data: rows.map(r => r.hll_uv),   backgroundColor: HLL_COLOR,   borderRadius: 2, opacity: 0.8 }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } },
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtNum(ctx.raw)}` } }
+                },
+                scales: { x: { beginAtZero: true }, y: { ticks: { font: { size: 10 } } } }
+            }
+        });
+
+        // Error % bar chart
+        destroyChart(errChartId);
+        charts[errChartId] = new Chart(document.getElementById(errChartId).getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Error %',
+                    data:  rows.map(r => +r.err_pct.toFixed(2)),
+                    backgroundColor: rows.map(r =>
+                        r.err_pct <= 1.6 ? '#6F7A1A' : r.err_pct <= 5 ? '#E4A911' : '#E60000'),
+                    borderRadius: 2
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: ctx => `${ctx.raw.toFixed(2)}%` } }
+                },
+                scales: {
+                    x: { beginAtZero: true, title: { display: true, text: '% error', font: { size: 10 } } },
+                    y: { ticks: { font: { size: 10 } } }
+                }
+            }
+        });
+
+        // Table
+        const thead = `<tr>
+            <th>${label}</th>
+            <th class="r">Events</th>
+            <th class="r">Exact UV</th>
+            <th class="r">HLL UV</th>
+            <th class="r">Delta</th>
+            <th class="r">Error %</th>
+        </tr>`;
+        const tbody = rows.map(r => `<tr>
+            <td>${esc(r.value)}</td>
+            <td class="r">${fmtNum(r.events)}</td>
+            <td class="r">${fmtNum(r.exact_uv)}</td>
+            <td class="r">${fmtNum(r.hll_uv)}</td>
+            <td class="r">${fmtNum(r.delta)}</td>
+            <td class="r ${errClass(r.err_pct)}">${fmtPct(r.err_pct)}</td>
+        </tr>`).join('');
+        document.getElementById(tableId).innerHTML =
+            `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+    }
+
+    // =========================================================================
+    // Story tab
+    // =========================================================================
+    async function renderStory() {
+        const exactRows = await q(`
+            SELECT story_id as value,
+                   COUNT(DISTINCT person_hash) as exact_uv,
+                   COUNT(*) as events,
+                   COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
+                   COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
+            FROM anon
+            WHERE story_id IS NOT NULL AND story_id != ''
+            GROUP BY story_id
+            ORDER BY exact_uv DESC
+            LIMIT 20
+        `);
+
+        const hllRows = await q(`SELECT value, hll_uv FROM hll_uv WHERE dimension = 'story_id' AND value IS NOT NULL`);
+        const hllMap = {};
+        hllRows.forEach(r => { hllMap[r.value] = Number(r.hll_uv); });
+
+        const rows = exactRows.map(r => {
+            const hll_uv  = hllMap[r.value] ?? 0;
+            const exact_uv = Number(r.exact_uv);
+            const delta   = Math.abs(exact_uv - hll_uv);
+            const err_pct = exact_uv > 0 ? delta / exact_uv * 100 : 0;
+            const label   = storyLabel(r.value);
+            return { ...r, exact_uv, hll_uv, delta, err_pct, label };
+        });
+
+        const labels = rows.map(r => r.label);
+
+        destroyChart('chartStory');
+        charts.chartStory = new Chart(document.getElementById('chartStory').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    { label: 'Exact UV', data: rows.map(r => r.exact_uv), backgroundColor: EXACT_COLOR, borderRadius: 2 },
+                    { label: 'HLL UV',   data: rows.map(r => r.hll_uv),   backgroundColor: HLL_COLOR,   borderRadius: 2 }
+                ]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } },
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${fmtNum(ctx.raw)}` } }
+                },
+                scales: { x: { beginAtZero: true }, y: { ticks: { font: { size: 10 } } } }
+            }
+        });
+
+        const thead = `<tr>
+            <th>Story</th>
+            <th class="r">Events</th>
+            <th class="r">Reads</th>
+            <th class="r">Likes</th>
+            <th class="r">Exact UV</th>
+            <th class="r">HLL UV</th>
+            <th class="r">Delta</th>
+            <th class="r">Error %</th>
+        </tr>`;
+        const tbody = rows.map(r => `<tr>
+            <td>${esc(r.label)}</td>
+            <td class="r">${fmtNum(r.events)}</td>
+            <td class="r">${fmtNum(r.reads)}</td>
+            <td class="r">${fmtNum(r.likes)}</td>
+            <td class="r">${fmtNum(r.exact_uv)}</td>
+            <td class="r">${fmtNum(r.hll_uv)}</td>
+            <td class="r">${fmtNum(r.delta)}</td>
+            <td class="r ${errClass(r.err_pct)}">${fmtPct(r.err_pct)}</td>
+        </tr>`).join('');
+        document.getElementById('tableStory').innerHTML =
+            `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+    }
+
+    // =========================================================================
+    // Monthly trend tab
+    // =========================================================================
+    async function renderTrend() {
+        const exactRows = await q(`
+            SELECT STRFTIME(session_date, '%Y-%m') as month,
+                   COUNT(DISTINCT person_hash) as exact_uv,
+                   COUNT(*) as events
+            FROM anon
+            WHERE session_date IS NOT NULL
+            GROUP BY month
+            ORDER BY month
+        `);
+
+        const hllRows = await q(`SELECT value as month, hll_uv FROM hll_uv WHERE dimension = 'month' ORDER BY value`);
+        const hllMap  = {};
+        hllRows.forEach(r => { hllMap[r.month] = Number(r.hll_uv); });
+
+        const rows = exactRows.map(r => {
+            const hll_uv   = hllMap[r.month] ?? 0;
+            const exact_uv = Number(r.exact_uv);
+            const delta    = Math.abs(exact_uv - hll_uv);
+            const err_pct  = exact_uv > 0 ? delta / exact_uv * 100 : 0;
+            return { month: r.month, exact_uv, hll_uv, delta, err_pct, events: Number(r.events) };
+        });
+
+        const labels = rows.map(r => r.month);
+
+        destroyChart('chartTrend');
+        charts.chartTrend = new Chart(document.getElementById('chartTrend').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    { label: 'Exact UV',  data: rows.map(r => r.exact_uv), borderColor: EXACT_COLOR, backgroundColor: 'rgba(46,71,107,0.08)', fill: true, tension: 0.3 },
+                    { label: 'HLL UV',    data: rows.map(r => r.hll_uv),   borderColor: HLL_COLOR,   backgroundColor: 'transparent', borderDash: [5,4], tension: 0.3 }
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12, font: { size: 10 } } } },
+                scales: { y: { beginAtZero: true } }
+            }
+        });
+
+        const thead = `<tr>
+            <th>Month</th>
+            <th class="r">Events</th>
+            <th class="r">Exact UV</th>
+            <th class="r">HLL UV</th>
+            <th class="r">Delta</th>
+            <th class="r">Error %</th>
+        </tr>`;
+        const tbody = rows.map(r => `<tr>
+            <td>${esc(r.month)}</td>
+            <td class="r">${fmtNum(r.events)}</td>
+            <td class="r">${fmtNum(r.exact_uv)}</td>
+            <td class="r">${fmtNum(r.hll_uv)}</td>
+            <td class="r">${fmtNum(r.delta)}</td>
+            <td class="r ${errClass(r.err_pct)}">${fmtPct(r.err_pct)}</td>
+        </tr>`).join('');
+        document.getElementById('tableTrend').innerHTML =
+            `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+    function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : (s || '(none)'); }
+    function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+
+    function storyLabel(sid) {
+        if (window._storyMeta) {
+            const m = window._storyMeta[String(sid)];
+            if (m) return truncate(m.story_title || m.author_email || String(sid), 32);
+        }
+        return 'Story ' + sid;
+    }
+
+    // Load story metadata if available (same pattern as main dashboard)
+    async function tryLoadStoryMeta() {
+        const base  = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
+        const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+        for (const p of paths) {
+            try {
+                await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}story_metadata.parquet')`);
+                const rows = (await conn.query('SELECT * FROM story_meta')).toArray();
+                window._storyMeta = {};
+                rows.forEach(r => {
+                    window._storyMeta[String(r.story_id)] = {
+                        story_title:  r.story_title  || null,
+                        author_email: r.author_email || r.email || null
+                    };
+                });
+                return;
+            } catch(e) { /* optional */ }
+        }
+    }
+
+    // =========================================================================
+    // Start
+    // =========================================================================
+    window.addEventListener('load', async () => {
+        await init();
+        await tryLoadStoryMeta();
+    });
+</script>
+</body>
+</html>

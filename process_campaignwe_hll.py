@@ -446,6 +446,60 @@ def export_hll_parquet(df, output_dir):
 
 
 # ---------------------------------------------------------------------------
+# UV aggregates export (browser-consumable, no sketch blobs)
+# ---------------------------------------------------------------------------
+
+def export_uv_aggregates(df, output_dir):
+    """Pre-compute HLL UV estimates at key dimensions and export for the browser.
+
+    Produces events_hll_uv.parquet with columns:
+        dimension  VARCHAR  — 'hr_division', 'hr_unit', 'hr_region', 'story_id',
+                               'action_type', 'month', 'overall'
+        value      VARCHAR  — the dimension value
+        event_count INTEGER — exact event count in that group
+        hll_uv     INTEGER  — HLL UV estimate (sketch-merged)
+
+    The browser dashboard loads this alongside events_anonymized.parquet and
+    computes exact UV via COUNT(DISTINCT person_hash) for comparison.
+    """
+    log("Computing UV aggregates for dashboard...")
+    records = []
+
+    # Per-dimension aggregations
+    for dim in ['hr_division', 'hr_unit', 'hr_region', 'story_id', 'action_type']:
+        if dim not in df.columns:
+            continue
+        for val, grp in df.groupby(dim, dropna=False):
+            uv  = _merge_sketches(grp['uv_sketch'])
+            evt = int(grp['event_count'].sum())
+            records.append({'dimension': dim,
+                            'value':     str(val) if pd.notna(val) else None,
+                            'event_count': evt,
+                            'hll_uv':    uv})
+
+    # Monthly trend — UV active per month (not cumulative)
+    df2 = df.copy()
+    df2['_month'] = pd.to_datetime(df2['session_date']).dt.to_period('M').astype(str)
+    for val, grp in df2.groupby('_month', dropna=False):
+        uv  = _merge_sketches(grp['uv_sketch'])
+        evt = int(grp['event_count'].sum())
+        records.append({'dimension': 'month', 'value': str(val),
+                        'event_count': evt, 'hll_uv': uv})
+
+    # Overall total
+    records.append({'dimension': 'overall', 'value': 'total',
+                    'event_count': int(df['event_count'].sum()),
+                    'hll_uv': _merge_sketches(df['uv_sketch'])})
+
+    result = pd.DataFrame(records)
+    out_path = output_dir / 'events_hll_uv.parquet'
+    result.to_parquet(str(out_path), index=False)
+    size_mb = os.path.getsize(out_path) / (1024 * 1024)
+    log(f"  events_hll_uv.parquet: {len(result):,} rows, {size_mb:.2f} MB")
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Comparison
 # ---------------------------------------------------------------------------
 
@@ -629,6 +683,7 @@ def process_campaignwe_hll(run_compare=False):
     # Export
     log("\nExporting...")
     export_hll_parquet(df, output_dir)
+    export_uv_aggregates(df, output_dir)
 
     log(f"\nDone. Output: {output_dir / 'events_hll.parquet'}")
 
