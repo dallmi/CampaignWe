@@ -316,15 +316,17 @@ customEvents
 // --- QUERY I: Daily aggregation — ALL events (click + video + search) ---
 // One aggregate row per (day × country × event-type × dimension combination).
 // Covers:
-//   click_event  → SiteName, PageName, ContentOwner, ContentType, PublishingDate,
-//                  Link_Type, FileType_Label, NewsCategory
+//   click_event  → SiteName, PageName, PageURL, ComponentName, ContentOwner,
+//                  ContentType, PublishingDate, Link_Type, FileType_Label, NewsCategory
 //   video events → identified by customDimensions has "Video_Action"
 //                  Video_Id, Video_Title, Video_Action, Video_Type, Video_Label, Video_Duration
-//   SEARCH*      → deviceType, queryLanguage, department
+//   SEARCH*      → deviceType, queryText, queryLanguage, queryLengthChars/Words,
+//                  searchLatency, searchAccuracy, clickedTAB, appliedFilter,
+//                  clickedPosition, resultTitle, resultUrl, department
 //
 // Fields that don't exist for an event type will be empty strings in that row.
-// High-cardinality dimensions (PageName, Video_Id, PublishingDate) cause small
-// groups; HLL still shows an estimated count (e.g. "1") without revealing who.
+// High-cardinality dimensions (PageName, Video_Id, queryText) create small groups;
+// HLL still shows an estimated count (e.g. "1") without revealing who.
 let TimeRange = 90d;
 customEvents
 | where timestamp >= ago(TimeRange)
@@ -333,27 +335,42 @@ customEvents
 | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
 // --- Parse nested L3 objects (present only on SEARCH events) ---
 | extend searchQuery_obj   = todynamic(tostring(CP.searchQuery))
+| extend searchPerf_obj    = todynamic(tostring(CP.searchPerformance))
+| extend searchResults_obj = todynamic(tostring(CP.searchResultsInteraction))
 | extend userDetails_obj   = todynamic(tostring(CP.userDetails))
+| extend clickedResult_obj = todynamic(tostring(searchResults_obj.clickedResult))
 // --- Click & Video dimensions (flat CP fields) ---
-| extend SiteName       = tostring(CP.SiteName)
-| extend PageName       = tostring(CP.PageName)
-| extend ContentOwner   = tostring(CP.ContentOwner)
-| extend ContentType    = tostring(CP.ContentType)
-| extend PublishingDate = tostring(CP.PublishingDate)
-| extend Link_Type      = tostring(CP.Link_Type)
-| extend FileType_Label = tostring(CP.FileType_Label)
-| extend NewsCategory   = tostring(CP.NewsCategory)
+| extend SiteName        = tostring(CP.SiteName)
+| extend PageName        = tostring(CP.PageName)
+| extend PageURL         = tostring(CP.PageURL)
+| extend ComponentName   = tostring(CP.ComponentName)
+| extend ContentOwner    = tostring(CP.ContentOwner)
+| extend ContentType     = tostring(CP.ContentType)
+| extend PublishingDate  = tostring(CP.PublishingDate)
+| extend Link_Type       = tostring(CP.Link_Type)
+| extend FileType_Label  = tostring(CP.FileType_Label)
+| extend NewsCategory    = tostring(CP.NewsCategory)
 // --- Video-specific dimensions ---
-| extend Video_Id       = tostring(CP.Video_Id)
-| extend Video_Title    = tostring(CP.Video_Title)
-| extend Video_Action   = tostring(CP.Video_Action)
-| extend Video_Type     = tostring(CP.Video_Type)
-| extend Video_Label    = tostring(CP.Video_Label)
-| extend Video_Duration = tostring(CP.Video_Duration)
+| extend Video_Id        = tostring(CP.Video_Id)
+| extend Video_Title     = tostring(CP.Video_Title)
+| extend Video_Action    = tostring(CP.Video_Action)
+| extend Video_Type      = tostring(CP.Video_Type)
+| extend Video_Label     = tostring(CP.Video_Label)
+| extend Video_Duration  = tostring(CP.Video_Duration)
 // --- Search-specific dimensions (nested; empty for click/video events) ---
-| extend deviceType     = tostring(CP.deviceType)
-| extend queryLanguage  = tostring(searchQuery_obj.queryLanguage)
-| extend department     = tostring(userDetails_obj.department)
+| extend deviceType      = tostring(CP.deviceType)
+| extend queryText       = coalesce(tostring(searchQuery_obj.queryText), tostring(CP.queryText))
+| extend queryLanguage   = tostring(searchQuery_obj.queryLanguage)
+| extend queryLengthChars = tostring(searchQuery_obj.queryLengthChars)
+| extend queryLengthWords = tostring(searchQuery_obj.queryLengthWords)
+| extend searchLatency   = tostring(searchPerf_obj.searchLatency)
+| extend searchAccuracy  = tostring(searchPerf_obj.searchAccuracy)
+| extend clickedTAB      = tostring(searchResults_obj.clickedTAB)
+| extend appliedFilter   = tostring(searchResults_obj.appliedFilter)
+| extend clickedPosition = tostring(searchResults_obj.clickedPosition)
+| extend resultTitle     = tostring(clickedResult_obj.resultTitle)
+| extend resultUrl       = tostring(clickedResult_obj.resultUrl)
+| extend department      = tostring(userDetails_obj.department)
 // --- Aggregate with HLL sketches ---
 | summarize
     EventCount               = count(),
@@ -363,22 +380,16 @@ customEvents
     ['date [UTC]']           = bin(timestamp, 1d),
     client_CountryOrRegion,
     name,
-    SiteName,
-    PageName,
-    ContentOwner,
-    ContentType,
-    PublishingDate,
-    Link_Type,
-    FileType_Label,
-    NewsCategory,
-    Video_Id,
-    Video_Title,
-    Video_Action,
-    Video_Type,
-    Video_Label,
-    Video_Duration,
-    deviceType,
-    queryLanguage,
+    // Click & Video
+    SiteName, PageName, PageURL, ComponentName,
+    ContentOwner, ContentType, PublishingDate,
+    Link_Type, FileType_Label, NewsCategory,
+    // Video-specific
+    Video_Id, Video_Title, Video_Action, Video_Type, Video_Label, Video_Duration,
+    // Search-specific
+    deviceType, queryText, queryLanguage, queryLengthChars, queryLengthWords,
+    searchLatency, searchAccuracy,
+    clickedTAB, appliedFilter, clickedPosition, resultTitle, resultUrl,
     department
 // --- Decode HLL sketches ---
 | extend
@@ -389,20 +400,27 @@ customEvents
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion,
     EventCount, EstimatedDistinctUsers, EstimatedDistinctSessions,
-    SiteName, PageName, ContentOwner, ContentType, PublishingDate,
+    SiteName, PageName, PageURL, ComponentName,
+    ContentOwner, ContentType, PublishingDate,
     Link_Type, FileType_Label, NewsCategory,
     Video_Id, Video_Title, Video_Action, Video_Type, Video_Label, Video_Duration,
-    deviceType, queryLanguage, department
+    deviceType, queryText, queryLanguage, queryLengthChars, queryLengthWords,
+    searchLatency, searchAccuracy,
+    clickedTAB, appliedFilter, clickedPosition, resultTitle, resultUrl,
+    department
 | order by ['date [UTC]'] desc, name asc
 
 
 // --- QUERY J: Terms aggregation — SEARCH events only ---
 // One aggregate row per (day × country × search-term × search dimensions).
-// Shows search volume, term characteristics, performance metrics and department
-// breakdown.  Covers all SEARCH* event types.
+// Shows search volume, term characteristics, performance metrics, tab/filter
+// usage and department breakdown.  Covers all SEARCH* event types.
 //
 // queryLengthChars / queryLengthWords: nested inside searchQuery object
 // searchLatency / searchAccuracy:      nested inside searchPerformance object
+// clickedTAB / appliedFilter:          nested inside searchResultsInteraction
+//                                      (tab switches and filter usage appear on
+//                                       search events even without a result click)
 // department:                          nested inside userDetails object
 let TimeRange = 90d;
 customEvents
@@ -412,9 +430,10 @@ customEvents
 | extend CustomPropsRaw = tostring(cd.CustomProps)
 | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
 // --- Parse nested L3 objects ---
-| extend searchQuery_obj  = todynamic(tostring(CP.searchQuery))
-| extend searchPerf_obj   = todynamic(tostring(CP.searchPerformance))
-| extend userDetails_obj  = todynamic(tostring(CP.userDetails))
+| extend searchQuery_obj   = todynamic(tostring(CP.searchQuery))
+| extend searchPerf_obj    = todynamic(tostring(CP.searchPerformance))
+| extend searchResults_obj = todynamic(tostring(CP.searchResultsInteraction))
+| extend userDetails_obj   = todynamic(tostring(CP.userDetails))
 // --- Extract dimensions ---
 | extend
     deviceType       = tostring(CP.deviceType),
@@ -427,6 +446,8 @@ customEvents
     queryLengthWords = tostring(searchQuery_obj.queryLengthWords),
     searchLatency    = tostring(searchPerf_obj.searchLatency),
     searchAccuracy   = tostring(searchPerf_obj.searchAccuracy),
+    clickedTAB       = tostring(searchResults_obj.clickedTAB),
+    appliedFilter    = tostring(searchResults_obj.appliedFilter),
     department       = tostring(userDetails_obj.department)
 // --- Aggregate with HLL sketches ---
 | summarize
@@ -444,6 +465,8 @@ customEvents
     queryLengthWords,
     searchLatency,
     searchAccuracy,
+    clickedTAB,
+    appliedFilter,
     department
 // --- Decode HLL sketches ---
 | extend
@@ -454,16 +477,18 @@ customEvents
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion, deviceType,
     queryText, queryLanguage, queryLengthChars, queryLengthWords,
-    searchLatency, searchAccuracy, department,
+    searchLatency, searchAccuracy, clickedTAB, appliedFilter, department,
     EventCount, EstimatedDistinctUsers, EstimatedDistinctSessions
 | order by ['date [UTC]'] desc, queryText asc
 
 
 // --- QUERY K: Terms + Clicks — SEARCH events with a result interaction ---
 // One aggregate row per (day × country × search-term × clicked-result combination).
-// Only rows where a result was actually clicked (clickedResult is non-empty).
+// Only rows where a result was actually clicked (resultTitle or resultUrl non-empty).
 // Maps each search query to the specific result the user chose, together with
 // its rank (clickedPosition), the active tab/filter and the total result count.
+//
+// clickedResult is a nested object → parsed into resultTitle + resultUrl.
 //
 // Use this to answer: "For query X, which result was clicked most often
 // and at what position?"
@@ -476,7 +501,10 @@ customEvents
 | extend CP = iff(isnotempty(CustomPropsRaw) and CustomPropsRaw startswith "{", todynamic(CustomPropsRaw), dynamic({}))
 // --- Parse nested L3 objects ---
 | extend searchQuery_obj    = todynamic(tostring(CP.searchQuery))
+| extend searchPerf_obj     = todynamic(tostring(CP.searchPerformance))
 | extend searchResults_obj  = todynamic(tostring(CP.searchResultsInteraction))
+| extend userDetails_obj    = todynamic(tostring(CP.userDetails))
+| extend clickedResult_obj  = todynamic(tostring(searchResults_obj.clickedResult))
 // --- Extract dimensions ---
 | extend
     deviceType       = tostring(CP.deviceType),
@@ -484,13 +512,19 @@ customEvents
                            tostring(searchQuery_obj.queryText),
                            tostring(CP.queryText)),
     queryLanguage    = tostring(searchQuery_obj.queryLanguage),
+    queryLengthChars = tostring(searchQuery_obj.queryLengthChars),
+    queryLengthWords = tostring(searchQuery_obj.queryLengthWords),
+    searchLatency    = tostring(searchPerf_obj.searchLatency),
+    searchAccuracy   = tostring(searchPerf_obj.searchAccuracy),
     clickedTAB       = tostring(searchResults_obj.clickedTAB),
     appliedFilter    = tostring(searchResults_obj.appliedFilter),
-    clickedResult    = tostring(searchResults_obj.clickedResult),
     clickedPosition  = tostring(searchResults_obj.clickedPosition),
-    totalResultCount = tostring(searchResults_obj.totalResultCount)
+    totalResultCount = tostring(searchResults_obj.totalResultCount),
+    resultTitle      = tostring(clickedResult_obj.resultTitle),
+    resultUrl        = tostring(clickedResult_obj.resultUrl),
+    department       = tostring(userDetails_obj.department)
 // --- Only retain events where a result was actually clicked ---
-| where isnotempty(clickedResult)
+| where isnotempty(resultTitle) or isnotempty(resultUrl)
 // --- Aggregate with HLL sketches ---
 | summarize
     ClickCount               = count(),
@@ -503,11 +537,17 @@ customEvents
     deviceType,
     queryText,
     queryLanguage,
+    queryLengthChars,
+    queryLengthWords,
+    searchLatency,
+    searchAccuracy,
     clickedTAB,
     appliedFilter,
-    clickedResult,
     clickedPosition,
-    totalResultCount
+    totalResultCount,
+    resultTitle,
+    resultUrl,
+    department
 // --- Decode HLL sketches ---
 | extend
     EstimatedDistinctUsers    = dcount_hll(UserHLL),
@@ -516,8 +556,10 @@ customEvents
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
     ['date [UTC]'], name, client_CountryOrRegion, deviceType,
-    queryText, queryLanguage, clickedTAB, appliedFilter,
-    clickedResult, clickedPosition, totalResultCount,
+    queryText, queryLanguage, queryLengthChars, queryLengthWords,
+    searchLatency, searchAccuracy,
+    clickedTAB, appliedFilter, clickedPosition, totalResultCount,
+    resultTitle, resultUrl, department,
     ClickCount, EstimatedDistinctUsers, EstimatedDistinctSessions
 | order by ['date [UTC]'] desc, queryText asc, clickedPosition asc
 
@@ -565,22 +607,37 @@ customEvents
 // --- Parse nested objects (search events) ---
 | extend searchQuery_obj   = todynamic(tostring(CP.searchQuery))
 | extend searchResults_obj = todynamic(tostring(CP.searchResultsInteraction))
+| extend userDetails_obj   = todynamic(tostring(CP.userDetails))
 // --- Classify and extract per-event fields ---
 | extend
-    isSearch      = name startswith "SEARCH",
-    isVideo       = customDimensions has "Video_Action",
-    queryText     = coalesce(
-                        tostring(searchQuery_obj.queryText),
-                        tostring(CP.queryText)),
-    clickedResult = tostring(searchResults_obj.clickedResult),
-    deviceType    = tostring(CP.deviceType),
-    SiteName      = tostring(CP.SiteName),
-    PageName      = tostring(CP.PageName),
-    ContentType   = tostring(CP.ContentType),
-    ContentOwner  = tostring(CP.ContentOwner),
-    Video_Title   = tostring(CP.Video_Title),
-    Video_Id      = tostring(CP.Video_Id),
-    Video_Action  = tostring(CP.Video_Action)
+    isSearch       = name startswith "SEARCH",
+    isVideo        = customDimensions has "Video_Action",
+    queryText      = coalesce(
+                         tostring(searchQuery_obj.queryText),
+                         tostring(CP.queryText)),
+    queryLanguage  = tostring(searchQuery_obj.queryLanguage),
+    clickedTAB     = tostring(searchResults_obj.clickedTAB),
+    appliedFilter  = tostring(searchResults_obj.appliedFilter),
+    resultTitle    = tostring(todynamic(tostring(searchResults_obj.clickedResult)).resultTitle),
+    resultUrl      = tostring(todynamic(tostring(searchResults_obj.clickedResult)).resultUrl),
+    department     = tostring(userDetails_obj.department),
+    deviceType     = tostring(CP.deviceType),
+    SiteName       = tostring(CP.SiteName),
+    PageName       = tostring(CP.PageName),
+    PageURL        = tostring(CP.PageURL),
+    ComponentName  = tostring(CP.ComponentName),
+    ContentType    = tostring(CP.ContentType),
+    ContentOwner   = tostring(CP.ContentOwner),
+    PublishingDate = tostring(CP.PublishingDate),
+    Link_Type      = tostring(CP.Link_Type),
+    FileType_Label = tostring(CP.FileType_Label),
+    NewsCategory   = tostring(CP.NewsCategory),
+    Video_Title    = tostring(CP.Video_Title),
+    Video_Id       = tostring(CP.Video_Id),
+    Video_Action   = tostring(CP.Video_Action),
+    Video_Type     = tostring(CP.Video_Type),
+    Video_Label    = tostring(CP.Video_Label),
+    Video_Duration = tostring(CP.Video_Duration)
 // --- Aggregate per session (session_Id is grouping key only, dropped at end) ---
 | summarize
     ['date [UTC]']         = bin(min(timestamp), 1d),
@@ -591,19 +648,32 @@ customEvents
     ClickCount             = countif(not(isSearch) and not(isVideo)),
     UniqueSearchTerms      = array_length(make_set_if(queryText,   isSearch and isnotempty(queryText))),
     UniquePageViews        = array_length(make_set_if(PageName,    isnotempty(PageName))),
-    ResultClicks           = countif(isnotempty(clickedResult)),
+    ResultClicks           = countif(isSearch and (isnotempty(resultTitle) or isnotempty(resultUrl))),
     ApproxDurationMinutes  = tolong((max(timestamp) - min(timestamp)) / 1m),
     // --- Array columns: all distinct values seen within this session ---
     EventTypes             = make_set(name),
-    DeviceTypes            = make_set_if(deviceType,    isnotempty(deviceType)),
-    SitesVisited           = make_set_if(SiteName,      isnotempty(SiteName)),
-    PagesVisited           = make_set_if(PageName,      isnotempty(PageName)),
-    ContentTypes           = make_set_if(ContentType,   isnotempty(ContentType)),
-    ContentOwners          = make_set_if(ContentOwner,  isnotempty(ContentOwner)),
-    VideosWatched          = make_set_if(Video_Title,   isVideo and isnotempty(Video_Title)),
-    VideoIds               = make_set_if(Video_Id,      isVideo and isnotempty(Video_Id)),
-    VideoActions           = make_set_if(Video_Action,  isVideo and isnotempty(Video_Action)),
-    SearchQueries          = make_set_if(queryText,     isSearch and isnotempty(queryText))
+    DeviceTypes            = make_set_if(deviceType,      isnotempty(deviceType)),
+    SitesVisited           = make_set_if(SiteName,        isnotempty(SiteName)),
+    PagesVisited           = make_set_if(PageName,        isnotempty(PageName)),
+    PageUrls               = make_set_if(PageURL,         isnotempty(PageURL)),
+    ComponentsUsed         = make_set_if(ComponentName,   isnotempty(ComponentName)),
+    ContentTypes           = make_set_if(ContentType,     isnotempty(ContentType)),
+    ContentOwners          = make_set_if(ContentOwner,    isnotempty(ContentOwner)),
+    LinkTypes              = make_set_if(Link_Type,       isnotempty(Link_Type)),
+    FileTypes              = make_set_if(FileType_Label,  isnotempty(FileType_Label)),
+    NewsCategories         = make_set_if(NewsCategory,    isnotempty(NewsCategory)),
+    VideosWatched          = make_set_if(Video_Title,     isVideo and isnotempty(Video_Title)),
+    VideoIds               = make_set_if(Video_Id,        isVideo and isnotempty(Video_Id)),
+    VideoActions           = make_set_if(Video_Action,    isVideo and isnotempty(Video_Action)),
+    VideoTypes             = make_set_if(Video_Type,      isVideo and isnotempty(Video_Type)),
+    VideoLabels            = make_set_if(Video_Label,     isVideo and isnotempty(Video_Label)),
+    Departments            = make_set_if(department,      isSearch and isnotempty(department)),
+    QueryLanguages         = make_set_if(queryLanguage,   isSearch and isnotempty(queryLanguage)),
+    SearchTabs             = make_set_if(clickedTAB,      isSearch and isnotempty(clickedTAB)),
+    SearchFilters          = make_set_if(appliedFilter,   isSearch and isnotempty(appliedFilter)),
+    ClickedResults         = make_set_if(resultTitle,     isSearch and isnotempty(resultTitle)),
+    ClickedUrls            = make_set_if(resultUrl,       isSearch and isnotempty(resultUrl)),
+    SearchQueries          = make_set_if(queryText,       isSearch and isnotempty(queryText))
     by session_Id
 // --- Drop session_Id: output contains no identifier ---
 | project-away session_Id
@@ -612,10 +682,12 @@ customEvents
     ['date [UTC]'], client_CountryOrRegion,
     TotalEvents, SearchCount, ClickCount, VideoCount,
     UniqueSearchTerms, UniquePageViews, ResultClicks, ApproxDurationMinutes,
-    EventTypes, DeviceTypes, SitesVisited, PagesVisited,
-    ContentTypes, ContentOwners,
-    VideosWatched, VideoIds, VideoActions,
-    SearchQueries
+    EventTypes, DeviceTypes,
+    SitesVisited, PagesVisited, PageUrls, ComponentsUsed,
+    ContentTypes, ContentOwners, LinkTypes, FileTypes, NewsCategories,
+    VideosWatched, VideoIds, VideoActions, VideoTypes, VideoLabels,
+    Departments, QueryLanguages, SearchTabs, SearchFilters,
+    ClickedResults, ClickedUrls, SearchQueries
 | order by ['date [UTC]'] desc, TotalEvents desc
 
 
