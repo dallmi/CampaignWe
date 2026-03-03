@@ -526,21 +526,36 @@ customEvents
 // One row per session; session_Id is used only as an internal grouping key
 // and is dropped from the output.  No user_Id, no GPN, no Email.
 //
-// Each output row describes the behaviour of one anonymous session:
-//   date / country / deviceType   — contextual metadata
-//   TotalEvents                   — total number of events in the session
-//   SearchCount / ClickCount / VideoCount — event-type breakdown
-//   UniqueSearchTerms             — distinct search queries entered
-//   UniquePageViews               — distinct pages visited
-//   ResultClicks                  — number of search results clicked
-//   ApproxDurationMinutes         — time from first to last event (may be 0 for
-//                                   single-event sessions)
-//   SearchQueries                 — set of search terms used (may contain names;
-//                                   review before sharing externally)
+// WHY DIMENSIONS ARE ARRAYS HERE (unlike Queries I–K):
+//   A session spans many events across different pages, sites and videos.
+//   There is no single SiteName or Video_Title for a whole session.
+//   Instead, multi-value dimensions are captured as sets so you can filter
+//   on them in Power BI / Fabric (e.g. "sessions that touched Site X").
 //
-// NOTE: No HLL needed here — session_Id is already the anonymous unit.
-//       UV counts would require HLL on user_Id; they are intentionally omitted
-//       to preserve the session-only scope of this file.
+// Scalar columns (single value per session):
+//   date [UTC]             — day the session started
+//   client_CountryOrRegion — country (consistent within a session)
+//   DeviceTypes            — set of device types seen (usually 1 value)
+//   TotalEvents            — total events in the session
+//   SearchCount / ClickCount / VideoCount — event-type breakdown
+//   UniqueSearchTerms      — count of distinct queries entered
+//   UniquePageViews        — count of distinct pages visited
+//   ResultClicks           — search results clicked
+//   ApproxDurationMinutes  — time first-to-last event (0 = single event)
+//
+// Array columns (one or more values per session — use for slice/filter):
+//   EventTypes             — set of event names  (e.g. ["click_event","SEARCH_TRIGGERED"])
+//   SitesVisited           — set of SiteNames visited
+//   PagesVisited           — set of PageNames visited
+//   ContentTypes           — set of ContentType values clicked
+//   ContentOwners          — set of ContentOwner values clicked
+//   VideosWatched          — set of Video_Title values played/resumed
+//   VideoIds               — set of Video_Id values
+//   VideoActions           — set of Video_Action values (play/pause/resume/ended)
+//   SearchQueries          — set of search terms (may contain names — review before sharing)
+//
+// NOTE: No HLL needed — session_Id is already the anonymous unit.
+//       UV counts would require HLL on user_Id; intentionally omitted here.
 let TimeRange = 90d;
 customEvents
 | where timestamp >= ago(TimeRange)
@@ -559,30 +574,48 @@ customEvents
                         tostring(CP.queryText)),
     clickedResult = tostring(searchResults_obj.clickedResult),
     deviceType    = tostring(CP.deviceType),
-    PageName      = tostring(CP.PageName)
+    SiteName      = tostring(CP.SiteName),
+    PageName      = tostring(CP.PageName),
+    ContentType   = tostring(CP.ContentType),
+    ContentOwner  = tostring(CP.ContentOwner),
+    Video_Title   = tostring(CP.Video_Title),
+    Video_Id      = tostring(CP.Video_Id),
+    Video_Action  = tostring(CP.Video_Action)
 // --- Aggregate per session (session_Id is grouping key only, dropped at end) ---
 | summarize
     ['date [UTC]']         = bin(min(timestamp), 1d),
     client_CountryOrRegion = take_any(client_CountryOrRegion),
-    deviceType             = take_any(deviceType),
     TotalEvents            = count(),
     SearchCount            = countif(isSearch),
     VideoCount             = countif(isVideo),
     ClickCount             = countif(not(isSearch) and not(isVideo)),
-    UniqueSearchTerms      = array_length(make_set_if(queryText,     isSearch and isnotempty(queryText))),
-    UniquePageViews        = array_length(make_set_if(PageName,      isnotempty(PageName))),
+    UniqueSearchTerms      = array_length(make_set_if(queryText,   isSearch and isnotempty(queryText))),
+    UniquePageViews        = array_length(make_set_if(PageName,    isnotempty(PageName))),
     ResultClicks           = countif(isnotempty(clickedResult)),
     ApproxDurationMinutes  = tolong((max(timestamp) - min(timestamp)) / 1m),
-    SearchQueries          = make_set_if(queryText, isSearch and isnotempty(queryText))
+    // --- Array columns: all distinct values seen within this session ---
+    EventTypes             = make_set(name),
+    DeviceTypes            = make_set_if(deviceType,    isnotempty(deviceType)),
+    SitesVisited           = make_set_if(SiteName,      isnotempty(SiteName)),
+    PagesVisited           = make_set_if(PageName,      isnotempty(PageName)),
+    ContentTypes           = make_set_if(ContentType,   isnotempty(ContentType)),
+    ContentOwners          = make_set_if(ContentOwner,  isnotempty(ContentOwner)),
+    VideosWatched          = make_set_if(Video_Title,   isVideo and isnotempty(Video_Title)),
+    VideoIds               = make_set_if(Video_Id,      isVideo and isnotempty(Video_Id)),
+    VideoActions           = make_set_if(Video_Action,  isVideo and isnotempty(Video_Action)),
+    SearchQueries          = make_set_if(queryText,     isSearch and isnotempty(queryText))
     by session_Id
 // --- Drop session_Id: output contains no identifier ---
 | project-away session_Id
 | extend ['date [UTC]'] = format_datetime(['date [UTC]'], 'dd/MM/yyyy')
 | project-reorder
-    ['date [UTC]'], client_CountryOrRegion, deviceType,
+    ['date [UTC]'], client_CountryOrRegion,
     TotalEvents, SearchCount, ClickCount, VideoCount,
-    UniqueSearchTerms, UniquePageViews, ResultClicks,
-    ApproxDurationMinutes, SearchQueries
+    UniqueSearchTerms, UniquePageViews, ResultClicks, ApproxDurationMinutes,
+    EventTypes, DeviceTypes, SitesVisited, PagesVisited,
+    ContentTypes, ContentOwners,
+    VideosWatched, VideoIds, VideoActions,
+    SearchQueries
 | order by ['date [UTC]'] desc, TotalEvents desc
 
 
