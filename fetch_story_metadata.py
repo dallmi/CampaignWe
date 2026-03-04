@@ -40,7 +40,7 @@ COLUMN_MAP = {
 
 # Additional columns to include in the output (optional — won't fail if missing)
 EXTRA_COLUMNS = {
-    "story_title": ["Story Title", "StoryTitle", "Title", "title", "story_title"],
+    "story_title": ["Story Title", "StoryTitle", "Title", "Titel", "title", "story_title"],
     "status_id": ["Status#Id", "StatusId", "Status_Id", "status#id"],
     "keys": ["*Keys"],  # suffix match — the only column ending in "Keys"
     "author_email": ["Email", "E-Mail", "email"],
