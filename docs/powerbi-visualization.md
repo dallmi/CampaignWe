@@ -1,8 +1,8 @@
 # Power BI Visualization Guide
 
-This document explains how to recreate the CampaignWe HTML dashboard in Power BI Desktop using the parquet files produced by `process_campaignwe.py`.
+This document explains how to build CampaignWe reports in Power BI Desktop using the parquet files produced by the processing pipeline.
 
-> **Data note**: The parquet files contain click data that has been pre-enriched with organisational (HR) fields during processing. The data is anonymised — no personally identifiable information is included. You do not need to perform any data matching yourself.
+> **Data note**: The parquet files contain click data that has been pre-enriched with organisational fields during processing. The data is anonymised — no personally identifiable information is included. You do not need to perform any data matching yourself.
 
 ---
 
@@ -48,7 +48,7 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
    - Events: `timestamp`, `timestamp_cet` → **DateTime**
    - Events: `event_hour`, `event_weekday_num`, `story_id` → **Whole Number**
    - Events: `person_hash` → **Text**
-   - Events: All `hr_*` columns → **Text**
+   - Events: All `visitor_*` columns → **Text**
    - Events: All count columns → **Whole Number**
    - StoryMeta: `story_id` → **Text** (to match Events[story_id] after cast)
    - StoryMeta: `author_email`, `author_division`, `author_department`, `author_job_title` → **Text**
@@ -160,8 +160,8 @@ These columns already exist in the parquet file from the Python pipeline, so you
 | `story_id` | Extracted story number | Yes |
 | `session_key` | Unique session identifier | Yes |
 | `person_hash` | Anonymised user identifier (hash) | Yes |
-| `hr_division` through `hr_function` | Organisational hierarchy fields | Yes |
-| `hr_region`, `hr_country` | Geographic fields | Yes |
+| `visitor_division` through `visitor_function` | Organisational hierarchy fields | Yes |
+| `visitor_region`, `visitor_country` | Geographic fields | Yes |
 
 If any column is missing, add it in Power Query (Transform Data) using M formulas equivalent to the Python logic documented in [data-pipeline.md](data-pipeline.md).
 
@@ -191,7 +191,7 @@ DIVIDE(
 
 Org Coverage % =
 DIVIDE(
-    COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_division])))),
+    COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_division])))),
     [Total Clicks],
     0
 ) * 100
@@ -235,14 +235,14 @@ DIVIDE(
 Org Matched Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[hr_division]))
+        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[visitor_division]))
     )
 )
 
 User No Org Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[hr_division])
+        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[visitor_division])
     )
 )
 
@@ -286,7 +286,7 @@ DIVIDE(
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.1 KPI Cards
+### 5.1 KPI Cards
 
 Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 
@@ -301,7 +301,7 @@ Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 
 **Formatting**: Background = `#ECEBE4`, font color = `#000000`, callout value color = `#E60000`.
 
-### 6.2 Daily Activity Trend
+### 5.2 Daily Activity Trend
 
 **Visual type**: Line chart (combo chart: area + line)
 
@@ -315,7 +315,7 @@ Add six **Card** visuals (or a single **Multi-row Card**) across the top:
 | Line style | Dashed |
 | Secondary Y-axis | On (for Unique Visitors) |
 
-### 6.3 Clicks by Hour
+### 5.3 Clicks by Hour
 
 **Visual type**: Clustered bar chart (vertical)
 
@@ -339,7 +339,7 @@ DIVIDE(
 
 Enable **Data labels** and add `[Hour % of Total]` as tooltip.
 
-### 6.4 Clicks by Weekday
+### 5.4 Clicks by Weekday
 
 **Visual type**: Clustered bar chart (vertical)
 
@@ -364,7 +364,7 @@ Apply via Format → Data colors → fx (conditional formatting) → Field value
 
 > **Sort order**: Click on the weekday axis, then in the column tools ribbon, "Sort by Column" → select `event_weekday_num` to ensure Monday–Sunday order.
 
-### 6.5 Activity Heatmap (Weekday x Hour)
+### 5.5 Activity Heatmap (Weekday x Hour)
 
 **Visual type**: Matrix
 
@@ -384,7 +384,7 @@ Apply via Format → Data colors → fx (conditional formatting) → Field value
 
 Disable row and column totals for a cleaner heatmap look. Set font size small (8pt) to fit 24 columns.
 
-### 6.6 Action Types Doughnut
+### 5.6 Action Types Doughnut
 
 **Visual type**: Donut chart
 
@@ -403,7 +403,7 @@ Action Type Display = IF(ISBLANK(Events[action_type]), "(null)", Events[action_t
 
 Use `Action Type Display` as the legend field.
 
-### 6.7 Link Types (Horizontal Bar)
+### 5.7 Link Types (Horizontal Bar)
 
 **Visual type**: Clustered bar chart (horizontal)
 
@@ -439,37 +439,37 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 6.1 Division Drilldown (GCRS Hierarchy)
+### 6.1 Division Drilldown (Organisational Hierarchy)
 
 **Visual type**: Clustered bar chart with **drill-down hierarchy**
 
 **Create a hierarchy** on the Events table:
-1. Right-click `hr_division` → New hierarchy → rename to "GCRS Hierarchy"
+1. Right-click `visitor_division` → New hierarchy → rename to "Organisation Hierarchy"
 2. Drag into the hierarchy in order:
-   - `hr_division`
-   - `hr_unit`
-   - `hr_area`
-   - `hr_sector`
-   - `hr_segment`
-   - `hr_function`
+   - `visitor_division`
+   - `visitor_unit`
+   - `visitor_area`
+   - `visitor_sector`
+   - `visitor_segment`
+   - `visitor_function`
 
 | Setting | Value |
 |---------|-------|
-| X-axis | GCRS Hierarchy |
+| X-axis | Organisation Hierarchy |
 | Y-axis | `[Total Clicks]` and `[Unique Visitors]` (grouped) |
 | Bar colors | `#404040` (Clicks), `#B8B3A2` (Unique Visitors) |
 | Drill mode | Enable drill-down (↓ icon in visual header) |
 | Top N | Optional: filter to Top 20 by `[Total Clicks]` |
 
-**Drill behavior**: Users click the drill-down arrow, then click a bar to drill into the next GCRS level. The breadcrumb appears automatically at the top of the visual.
+**Drill behavior**: Users click the drill-down arrow, then click a bar to drill into the next level. The breadcrumb appears automatically at the top of the visual.
 
 ### 6.2 Region → Country Drilldown
 
 **Visual type**: Clustered bar chart with drill-down
 
 **Create a hierarchy**:
-1. Right-click `hr_region` → New hierarchy → "Geography"
-2. Add `hr_country` beneath it
+1. Right-click `visitor_region` → New hierarchy → "Geography"
+2. Add `visitor_country` beneath it
 
 | Setting | Value |
 |---------|-------|
@@ -488,9 +488,9 @@ This requires a Top N filter to show only the 5 most active divisions.
 |---------|-------|
 | X-axis | DateTable[Date] |
 | Y-axis | `[Unique Visitors]` |
-| Legend | Events[hr_division] |
+| Legend | Events[visitor_division] |
 
-**Top N filter**: Click on the visual → Filters pane → `hr_division` → Filter type: Top N → Top 5 by `[Unique Visitors]`.
+**Top N filter**: Click on the visual → Filters pane → `visitor_division` → Filter type: Top N → Top 5 by `[Unique Visitors]`.
 
 Colors will auto-assign from the 20-color theme palette.
 
@@ -500,7 +500,7 @@ Colors will auto-assign from the 20-color theme palette.
 
 | Column | Value/Measure |
 |--------|---------------|
-| Division | Events[hr_division] |
+| Division | Events[visitor_division] |
 | Clicks | `[Total Clicks]` |
 | Unique Visitors | `[Unique Visitors]` |
 | Clicks/Visitor | `[Clicks per Visitor]` |
@@ -547,7 +547,7 @@ Colors will auto-assign from the 20-color theme palette.
 | Data labels | On |
 | Sort | Descending by value |
 
-**Label formatting**: Create a calculated column that shows the story title when available (the dev team will add this field to the SharePoint list), falls back to the author's email, and finally to "Story {id}":
+**Label formatting**: Create a calculated column that shows the story title when available, falls back to the author's email, and finally to "Story {id}":
 
 ```dax
 Story Label =
@@ -605,19 +605,19 @@ Assign distinct colors from the chart palette to each measure series:
 
 | Setting | Value |
 |---------|-------|
-| Rows | Events[hr_division] |
+| Rows | Events[visitor_division] |
 | Columns | Story Label |
 | Values | `[Views]` |
 
 **Top N filters**:
-- Rows: Top 10 hr_division by `[Total Clicks]`
+- Rows: Top 10 visitor_division by `[Total Clicks]`
 - Columns: Top 10 story_id by `[Views]`
 
 **Conditional formatting**: Same heatmap gradient as the Activity Heatmap (`#FFFFFF` → `#E4A911` → `#8A000A`).
 
 ### 7.5 Region x Story Heatmap
 
-**Visual type**: Matrix — identical to Division heatmap but with `hr_region` on rows.
+**Visual type**: Matrix — identical to Division heatmap but with `visitor_region` on rows.
 
 ### 7.6 Daily Views — Top 5 Stories
 
@@ -711,8 +711,8 @@ DATATABLE(
     {
         {"person_hash"}, {"session_id"}, {"user_id"},
         {"story_id"}, {"action_type"},
-        {"hr_division"}, {"hr_unit"}, {"hr_area"},
-        {"hr_region"}, {"hr_country"}
+        {"visitor_division"}, {"visitor_unit"}, {"visitor_area"},
+        {"visitor_region"}, {"visitor_country"}
     }
 )
 ```
@@ -727,11 +727,11 @@ RETURN SWITCH(
     "user_id", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[user_id])))),
     "story_id", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[story_id])))),
     "action_type", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[action_type])))),
-    "hr_division", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_division])))),
-    "hr_unit", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_unit])))),
-    "hr_area", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_area])))),
-    "hr_region", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_region])))),
-    "hr_country", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_country])))),
+    "visitor_division", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_division])))),
+    "visitor_unit", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_unit])))),
+    "visitor_area", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_area])))),
+    "visitor_region", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_region])))),
+    "visitor_country", COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_country])))),
     BLANK()
 )
 
@@ -780,7 +780,7 @@ Power BI does not natively support named presets (7d, 14d, 30d, etc.), but you c
 
 ### Cross-Filtering Behavior
 
-By default, Power BI cross-filters between visuals on the same page. This mirrors the HTML dashboard's click-to-filter behavior:
+By default, Power BI cross-filters between visuals on the same page:
 - Clicking a doughnut slice filters the entire page to that action type
 - Clicking a bar in Link Types filters to that link type
 - Clicking a division bar filters stories, etc.
@@ -817,7 +817,7 @@ DIVIDE([Total Clicks], [Unique Visitors], 0)
 
 Org Coverage % =
 DIVIDE(
-    COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[hr_division])))),
+    COUNTROWS(FILTER(Events, NOT(ISBLANK(Events[visitor_division])))),
     [Total Clicks],
     0
 ) * 100
@@ -873,14 +873,14 @@ DIVIDE(
 Org Matched Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[hr_division]))
+        NOT(ISBLANK(Events[person_hash])) && NOT(ISBLANK(Events[visitor_division]))
     )
 )
 
 User No Org Count =
 COUNTROWS(
     FILTER(Events,
-        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[hr_division])
+        NOT(ISBLANK(Events[person_hash])) && ISBLANK(Events[visitor_division])
     )
 )
 
@@ -919,7 +919,6 @@ IF(ISBLANK(Events[action_type]), "(null)", Events[action_type])
 Link Type Display =
 IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
 
-// Story Label: use story_title if available (coming soon), then author_email, then fallback to "Story {id}"
 Story Label =
 IF(
     ISBLANK(Events[story_id]),
@@ -930,10 +929,10 @@ IF(
 )
 
 Division Display =
-IF(ISBLANK(Events[hr_division]), "(unknown)", Events[hr_division])
+IF(ISBLANK(Events[visitor_division]), "(unknown)", Events[visitor_division])
 
 Region Display =
-IF(ISBLANK(Events[hr_region]), "(unknown)", Events[hr_region])
+IF(ISBLANK(Events[visitor_region]), "(unknown)", Events[visitor_region])
 ```
 
 ### Helper Tables
@@ -972,8 +971,8 @@ DATATABLE(
     {
         {"person_hash"}, {"session_id"}, {"user_id"},
         {"story_id"}, {"action_type"},
-        {"hr_division"}, {"hr_unit"}, {"hr_area"},
-        {"hr_region"}, {"hr_country"}
+        {"visitor_division"}, {"visitor_unit"}, {"visitor_area"},
+        {"visitor_region"}, {"visitor_country"}
     }
 )
 ```
@@ -1004,7 +1003,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 4. [ ] Create `_Measures` table and paste all DAX measures
 5. [ ] Add calculated columns (Action Type Display, Story Label, etc.)
 6. [ ] Build Page 1 (Overview) — KPIs, trend, hour/weekday bars, heatmap, doughnut
-7. [ ] Build Page 2 (Divisions & Regions) — GCRS hierarchy, region drilldown, table
+7. [ ] Build Page 2 (Divisions & Regions) — organisational hierarchy, region drilldown, table
 8. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
 9. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
 10. [ ] Add slicers (Date, Action Type, Link Type) to each page

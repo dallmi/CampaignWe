@@ -2,9 +2,9 @@
 
 ## Overview
 
-This pipeline processes click data extracted from Azure Application Insights for the GWM Prompt Library page. It ingests KQL exports (`.xlsx` or `.csv`), enriches them with HR organisational data via GPN lookup, computes derived metrics, and exports Parquet files consumed by an interactive in-browser dashboard.
+This pipeline processes click data extracted from Azure Application Insights for the GWM Prompt Library page. It ingests KQL exports (`.xlsx` or `.csv`), enriches them with organisational data, computes derived metrics, and exports Parquet files for reporting.
 
-> **Terminology**: Every record in this pipeline represents a **click** — a user clicking a link, button, or story on the page. The source Application Insights event type is `click_event`. Database tables and columns use the name `events` (inherited from App Insights conventions), but these are always click events. The dashboard labels them as **clicks**.
+> **Terminology**: Every record in this pipeline represents a **click** — a user clicking a link, button, or story on the page. The source Application Insights event type is `click_event`. Database tables and columns use the name `events` (inherited from App Insights conventions), but these are always click events.
 
 ```
 Application Insights (KQL)
@@ -15,13 +15,10 @@ Application Insights (KQL)
         v
   process_campaignwe.py        <-- delta detection + upsert + enrichment
         |
-        +---> data/campaignwe.db           (DuckDB database)
-        +---> output/events_raw.parquet            (internal: all events with raw GPNs + emails)
-        +---> output/events_anonymized.parquet   (primary: GPNs hashed to person_hash, emails dropped)
+        +---> data/campaignwe.db                 (DuckDB database)
+        +---> output/events_raw.parquet          (internal: all events with raw identifiers)
+        +---> output/events_anonymized.parquet   (primary: anonymised, visitor_* org fields)
         +---> output/story_metadata.parquet      (story lookup: text, keys, author info)
-        |
-        v
-  dashboard/dashboard.html     <-- loads events_anonymized + story_metadata via DuckDB WASM
 ```
 
 ---
@@ -97,7 +94,7 @@ python process_campaignwe.py --full-refresh
 1. Export data from App Insights (daily or weekly)
 2. Save the `.xlsx` or `.csv` file to `input/`
 3. Run `python process_campaignwe.py`
-4. Open `dashboard/dashboard.html` in a browser
+4. Use the output parquet files for reporting
 
 ---
 
@@ -188,22 +185,16 @@ The composite key relies on timestamp uniqueness. If two identical events from t
 
 After file loading and upsert, the script runs these stages:
 
-### 1. HR History Join
+### 1. Organisational Data Enrichment
 
-Loads `hr_history.parquet` from `../SearchAnalytics/output/` and joins on GPN with time-aware matching:
-
-- **Primary match**: Most recent HR snapshot where `snapshot_date <= event_date`
-- **Fallback match**: Closest following snapshot (for events before the first snapshot)
-
-This adds organisational fields: `hr_division`, `hr_unit`, `hr_area`, `hr_sector`, `hr_segment`, `hr_function`, `hr_country`, `hr_region`, etc.
+The pipeline enriches click events with organisational fields (division, unit, area, sector, region, country, etc.) using an internal data source. This produces `visitor_*` columns in the anonymised output.
 
 ### 2. Calculated Columns
 
 | Column | Description |
 |--------|-------------|
-| `gpn` | Normalised 8-digit GPN (zero-padded, `.0` stripped) — internal only, hashed to `person_hash` in anonymized export |
-| `email` | Resolved from available email columns — internal only, dropped in anonymized export |
-| `story_id` | Extracted from `CP_Link_label` via "story of NNN" pattern |
+| `person_hash` | Anonymised user identifier (SHA-256 hash) |
+| `story_id` | Extracted from `CP_Link_label` via leading digits pattern |
 | `action_type` | Classified from `CP_Link_label` (see mapping below) |
 | `timestamp_cet` | UTC converted to Europe/Berlin timezone |
 | `session_date` | CET-based date (for daily bucketing) |
@@ -214,6 +205,8 @@ This adds organisational fields: `hr_division`, `hr_unit`, `hr_area`, `hr_sector
 | `prev_event` / `prev_timestamp` | Previous event in session (for flow analysis) |
 | `ms_since_prev_event` | Milliseconds since previous event |
 | `time_since_prev_bucket` | Categorised interval (< 0.5s, 0.5-1s, 1-2s, ..., > 60s) |
+| `visitor_division` through `visitor_function` | Organisational hierarchy fields |
+| `visitor_region`, `visitor_country` | Geographic fields |
 
 #### Action Type Classification
 
@@ -226,15 +219,15 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 | `%Cancel%` | **Cancel** | User cancelled/closed the submission form |
 | `%Read%` | **Read** | User opened/expanded a story |
 | `%like%` | **Like** | User liked content |
-| Anything else | **Other** | Unclassified click (excluded from dashboard) |
+| Anything else | **Other** | Unclassified click (excluded from reporting) |
 
-**Other** groups clicks that add no analytical value: closing a story after reading it (`close`), editing form fields (`edit`), browsing/pagination (`See more stories`, pure digit clicks), and events with no label (`NULL`). These are retained in the data for completeness but excluded from all dashboard views.
+**Other** groups clicks that add no analytical value: closing a story after reading it (`close`), editing form fields (`edit`), browsing/pagination (`See more stories`, pure digit clicks), and events with no label (`NULL`). These are retained in the data for completeness but excluded from reporting views.
 
 The `story_id` is extracted from the leading digits in `CP_Link_label` — e.g., `"15Read full story"` yields `story_id = 15`.
 
 #### Views per Visitor
 
-Used in the dashboard and notebook engagement tables:
+Used in engagement tables:
 
 ```
 views_per_visitor = COUNT(action_type = 'Read') / COUNT(DISTINCT person_hash)
@@ -246,11 +239,9 @@ This is the average number of story-open clicks per unique visitor within a give
 
 | File | Contents | Grain |
 |------|----------|-------|
-| `events_raw.parquet` | All events with raw GPNs, emails, and HR columns (internal use only) | One row per event |
-| `events_anonymized.parquet` | Primary export: GPNs hashed to `person_hash`, emails dropped | One row per event |
+| `events_raw.parquet` | All events with raw identifiers and org columns (internal use only) | One row per event |
+| `events_anonymized.parquet` | Primary export: identifiers hashed/dropped, `visitor_*` org fields | One row per event |
 | `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info, keys | One row per story |
-
-The **dashboard and Power BI** consume `events_anonymized.parquet` and `story_metadata.parquet`. The raw file is kept for internal diagnostics only.
 
 ---
 
@@ -262,50 +253,8 @@ The DuckDB database at `data/campaignwe.db` contains:
 |-------|-------------|
 | `events_raw` | Raw imported data (pre-enrichment) — dropped after enrichment |
 | `events` | Final enriched table with all calculated columns |
-| `hr_history` | HR organisational data (loaded each run, dropped after join) |
 | `story_titles` | Story metadata (loaded each run from `story_metadata.parquet`, dropped after join) |
 | `processed_files` | File processing manifest for delta tracking |
-
----
-
-## Dashboard & Power BI Semantic Model
-
-The parquet outputs serve two consumers:
-
-```
-  output/events_anonymized.parquet ─┬──► dashboard/dashboard.html  (DuckDB WASM, in-browser)
-  output/story_metadata.parquet    ─┤
-                                    └──► Power BI Semantic Model
-                                           ├── Events (fact table)
-                                           ├── StoryMeta (lookup)
-                                           ├── DateTable, HourTable (helpers, connected)
-                                           ├── CoverageCategory, FieldList (helpers, disconnected)
-                                           ├── _Measures (15 DAX measures)
-                                           └── Calculated columns on Events
-```
-
-The Power BI semantic model imports the same parquet files and adds DAX measures, calculated columns, and helper tables on top. See [powerbi-visualization.md](powerbi-visualization.md) for the full model diagram and setup guide.
-
-### HTML Dashboard
-
-The interactive dashboard at `dashboard/dashboard.html` loads the Parquet files directly in the browser using DuckDB WASM. No server is required.
-
-### Tabs
-
-1. **Overview** -- KPIs, daily trends, hourly/weekday distributions, weekday × hour heatmap, action types, link types
-2. **Divisions & Regions** -- 6-level GCRS hierarchy drilldown, regional breakdown, engagement depth table
-3. **Stories** -- Top stories, engagement funnel, key engagement, division/region heatmaps, individual XLSX export
-4. **Data Completeness** -- Organisational data coverage, field fill rates
-
-### Filters
-
-- Date range presets (7d, 14d, 30d, this month, last month, YTD, all time, custom)
-- Click-to-filter on Action Types (doughnut) and Link Types (bar) charts
-- Division/region drill-down filters with visual tags
-
-### Opening
-
-Simply open `dashboard/dashboard.html` in a modern browser. It looks for Parquet files at `../output/` relative to the HTML file.
 
 ---
 
@@ -326,17 +275,9 @@ WARNING: Column 'timestamp' has no microsecond precision!
 
 This means the input file (likely `.xlsx`) has truncated timestamps. Export from App Insights as CSV instead.
 
-### Unmatched GPNs
+### Unmatched Visitors
 
-GPNs appearing in events but not in `hr_history.parquet` are shown in the summary. Common causes:
-- GPN format mismatch (leading zeros, `.0` suffix from Excel)
-- Employee not in the HR snapshot timeframe
+Visitors appearing in events but without organisational data are shown in the summary. Common causes:
+- Identifier format mismatch
+- Employee not in the organisational data timeframe
 - External or contractor accounts
-
-### HR history not found
-
-```
-WARNING: HR history file not found
-```
-
-The script expects `../SearchAnalytics/output/hr_history.parquet`. Run the SearchAnalytics HR processing script first, or the pipeline will proceed without HR enrichment.
