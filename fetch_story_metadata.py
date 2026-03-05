@@ -31,6 +31,7 @@ import pandas as pd
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_INPUT_DIR = SCRIPT_DIR / "input"
 OUTPUT_PATH = SCRIPT_DIR / "output" / "story_metadata.parquet"
+HR_HISTORY_PATH = SCRIPT_DIR.parent / "SearchAnalytics" / "output" / "hr_history.parquet"
 
 # Relative path inside OneDrive to the Power Automate output folder
 ONEDRIVE_INPUT_DIR = Path("Projekte") / "CampaignWe" / "input"
@@ -253,6 +254,35 @@ def main():
             print(f"  Joined titles: {matched}/{len(df)} rows matched")
         else:
             print(f"  No Title lookup file found in {input_file.parent}/")
+
+    # Enrich with country from hr_history.parquet (e_mail_address -> work_location_country)
+    if "author_email" in extra_mapped and HR_HISTORY_PATH.exists():
+        print("\n  Enriching with country from hr_history.parquet...")
+        try:
+            hr = pd.read_parquet(HR_HISTORY_PATH,
+                                 columns=["e_mail_address", "work_location_country",
+                                          "snapshot_year", "snapshot_month"])
+            hr = hr.dropna(subset=["e_mail_address", "work_location_country"])
+            # Keep only the latest snapshot to avoid duplicates
+            latest = hr.nlargest(1, ["snapshot_year", "snapshot_month"])[["snapshot_year", "snapshot_month"]].iloc[0]
+            hr = hr[(hr["snapshot_year"] == latest["snapshot_year"]) &
+                    (hr["snapshot_month"] == latest["snapshot_month"])]
+            hr["e_mail_address"] = hr["e_mail_address"].astype(str).str.strip().str.lower()
+            country_map = hr[["e_mail_address", "work_location_country"]].drop_duplicates(subset=["e_mail_address"], keep="first")
+            country_map.columns = ["email", "author_country"]
+            print(f"  Using HR snapshot {int(latest['snapshot_year'])}-{int(latest['snapshot_month']):02d}")
+
+            email_col = extra_mapped["author_email"]
+            df["_join_email"] = df[email_col].astype(str).str.strip().str.lower()
+            df = df.merge(country_map, left_on="_join_email", right_on="email", how="left")
+            df.drop(columns=["_join_email", "email"], inplace=True)
+            extra_mapped["author_country"] = "author_country"
+            matched = df["author_country"].notna().sum()
+            print(f"  Country enrichment: {matched}/{len(df)} rows matched")
+        except Exception as e:
+            print(f"  Warning: Could not enrich country: {e}")
+    elif not HR_HISTORY_PATH.exists():
+        print(f"  Info: {HR_HISTORY_PATH} not found, skipping country enrichment")
 
     # Build result with required + extra columns
     src_cols = [mapped["story_id"], mapped["story_text"]]
