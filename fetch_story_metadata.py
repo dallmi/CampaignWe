@@ -200,12 +200,16 @@ def load_title_lookup(input_dir):
         print(f"           Columns: {list(title_df.columns)}")
         return None
 
+    print(f"  Title file columns: {list(title_df.columns)}")
+    print(f"  Using: ID='{id_col}', Title='{title_col}'")
+
     result = title_df[[id_col, title_col]].copy()
     result.columns = ["id", "title"]
     result["id"] = result["id"].astype(str).str.strip()
     result = result.dropna(subset=["title"])
     result = result.drop_duplicates(subset=["id"], keep="first")
     print(f"  Title lookup: {len(result)} entries")
+    print(f"  Title IDs: {result['id'].tolist()}")
     return result
 
 
@@ -252,6 +256,15 @@ def main():
             extra_mapped["story_title"] = "title"
             matched = df["title"].notna().sum()
             print(f"  Joined titles: {matched}/{len(df)} rows matched")
+            print(f"\n  {'ID':<8} {'Title':<60} {'Match'}")
+            print(f"  {'─'*8} {'─'*60} {'─'*5}")
+            id_col_name = mapped["story_id"]
+            for _, row in df.iterrows():
+                sid = str(row[id_col_name]).strip()
+                title = row.get("title", None)
+                status = "✓" if pd.notna(title) else "✗"
+                title_str = str(title)[:58] if pd.notna(title) else "(no match)"
+                print(f"  {sid:<8} {title_str:<60} {status}")
         else:
             print(f"  No Title lookup file found in {input_file.parent}/")
 
