@@ -5,6 +5,10 @@ The CSV is automatically synced by a Power Automate flow from a SharePoint list
 into a OneDrive folder. This script reads it, filters active stories (Status#Id = 1),
 and saves story_metadata.parquet with ID, title, and author metadata columns.
 
+If the main file has no story_title column but does have an Email column,
+the script looks for a separate "Title*.csv" or "Title*.xlsx" file in the
+same folder. It joins on Email to enrich the data with display names/titles.
+
 Input priority:
   1. OneDrive sync folder: <OneDrive>/Projekte/CampaignWe/input/We Are *.csv
   2. Local fallback: input/ folder (any .xlsx or .csv)
@@ -51,6 +55,13 @@ EXTRA_COLUMNS = {
     "created": ["Created", "created"],
     "modified": ["Modified", "modified"],
 }
+
+# Title lookup file: a separate CSV/XLSX with Email and Title columns
+# placed in the same folder as the main story list. Joined on Email
+# when the main file doesn't contain a story_title column directly.
+TITLE_FILE_PATTERN = "Title*"
+TITLE_EMAIL_CANDIDATES = ["Email", "E-Mail", "email"]
+TITLE_NAME_CANDIDATES = ["Title", "Titel", "Name", "DisplayName", "Display Name"]
 
 # Only include rows where this column equals the given value
 FILTER_COLUMN = "status_id"  # references our_name in EXTRA_COLUMNS
@@ -162,6 +173,41 @@ def resolve_column(df, candidates):
     return None
 
 
+def load_title_lookup(input_dir):
+    """Load a Title lookup file from the same folder as the main story file.
+
+    Returns a DataFrame with columns [email, title] or None if not found.
+    """
+    candidates = []
+    for ext in ("*.csv", "*.xlsx"):
+        candidates.extend(input_dir.glob(TITLE_FILE_PATTERN + ext[1:]))
+    candidates = [f for f in candidates if not f.name.startswith("~$")]
+
+    if not candidates:
+        return None
+
+    newest = max(candidates, key=lambda f: f.stat().st_mtime)
+    print(f"  Title lookup file: {newest.name}")
+
+    title_df = read_file(newest)
+
+    email_col = resolve_column(title_df, TITLE_EMAIL_CANDIDATES)
+    title_col = resolve_column(title_df, TITLE_NAME_CANDIDATES)
+
+    if email_col is None or title_col is None:
+        print(f"  Warning: Title file found but missing Email or Title column")
+        print(f"           Columns: {list(title_df.columns)}")
+        return None
+
+    result = title_df[[email_col, title_col]].copy()
+    result.columns = ["email", "title"]
+    result["email"] = result["email"].astype(str).str.strip().str.lower()
+    result = result.dropna(subset=["title"])
+    result = result.drop_duplicates(subset=["email"], keep="first")
+    print(f"  Title lookup: {len(result)} entries")
+    return result
+
+
 def main():
     preview = "--preview" in sys.argv
 
@@ -192,6 +238,21 @@ def main():
             extra_mapped[our_name] = col
         else:
             print(f"  Warning: optional column '{our_name}' not found (looked for {candidates})")
+
+    # If story_title is missing but author_email is present, try joining from Title lookup file
+    if "story_title" not in extra_mapped and "author_email" in extra_mapped:
+        print("\n  story_title not in main file — looking for Title lookup file...")
+        title_lookup = load_title_lookup(input_file.parent)
+        if title_lookup is not None:
+            email_col = extra_mapped["author_email"]
+            df["_join_email"] = df[email_col].astype(str).str.strip().str.lower()
+            df = df.merge(title_lookup, left_on="_join_email", right_on="email", how="left")
+            df.drop(columns=["_join_email", "email"], inplace=True)
+            extra_mapped["story_title"] = "title"
+            matched = df["title"].notna().sum()
+            print(f"  Joined titles: {matched}/{len(df)} rows matched")
+        else:
+            print(f"  No Title lookup file found in {input_file.parent}/")
 
     # Build result with required + extra columns
     src_cols = [mapped["story_id"], mapped["story_text"]]
