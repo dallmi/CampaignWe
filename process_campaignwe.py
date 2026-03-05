@@ -421,8 +421,22 @@ def load_story_titles(con, story_titles_path):
         SELECT * FROM read_parquet('{story_titles_path}')
     """)
 
+    # Ensure story_id is VARCHAR to match events.story_id (extracted via regex)
+    st_type = con.execute("SELECT typeof(story_id) FROM story_titles LIMIT 1").fetchone()
+    if st_type and st_type[0] != 'VARCHAR':
+        log(f"  Casting story_titles.story_id from {st_type[0]} to VARCHAR")
+        con.execute("ALTER TABLE story_titles ALTER story_id TYPE VARCHAR")
+
     row_count = con.execute("SELECT COUNT(*) FROM story_titles").fetchone()[0]
     log(f"  Loaded story_titles: {row_count} stories")
+
+    # Diagnostic: show story_id values for debugging joins
+    sample = con.execute("""
+        SELECT story_id, story_title FROM story_titles ORDER BY story_id
+    """).fetchall()
+    for sid, title in sample:
+        log(f"    story_titles: id={sid!r} title={title!r}")
+
     return True
 
 
@@ -1239,6 +1253,17 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
         """).fetchone()[0]
         log(f"  Matched {matched}/{total} story IDs to metadata" +
             (" (with keys)" if has_keys else ""))
+
+        # Diagnostic: show which event story_ids matched/missed
+        diag = con.execute("""
+            SELECT DISTINCT e.story_id, e.story_title,
+                   CASE WHEN e.story_title IS NOT NULL THEN 'OK' ELSE 'MISS' END as status
+            FROM events e
+            WHERE e.story_id IS NOT NULL
+            ORDER BY e.story_id
+        """).fetchall()
+        for sid, title, status in diag:
+            log(f"    events join: id={sid!r} title={title!r} [{status}]")
 
     # Export Parquet files
     export_parquet_files(con, output_dir)
