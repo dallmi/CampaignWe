@@ -57,11 +57,11 @@ EXTRA_COLUMNS = {
     "modified": ["Modified", "modified"],
 }
 
-# Title lookup file: a separate CSV/XLSX with Email and Title columns
-# placed in the same folder as the main story list. Joined on Email
+# Title lookup file: a separate CSV/XLSX with ID and Title columns
+# placed in the same folder as the main story list. Joined on ID
 # when the main file doesn't contain a story_title column directly.
 TITLE_FILE_PATTERN = "Title*"
-TITLE_EMAIL_CANDIDATES = ["Email", "E-Mail", "email"]
+TITLE_ID_CANDIDATES = ["ID", "Id", "id"]
 TITLE_NAME_CANDIDATES = ["Title", "Titel", "Name", "DisplayName", "Display Name"]
 
 # Only include rows where this column equals the given value
@@ -177,7 +177,7 @@ def resolve_column(df, candidates):
 def load_title_lookup(input_dir):
     """Load a Title lookup file from the same folder as the main story file.
 
-    Returns a DataFrame with columns [email, title] or None if not found.
+    Returns a DataFrame with columns [id, title] or None if not found.
     """
     candidates = []
     for ext in ("*.csv", "*.xlsx"):
@@ -192,19 +192,19 @@ def load_title_lookup(input_dir):
 
     title_df = read_file(newest)
 
-    email_col = resolve_column(title_df, TITLE_EMAIL_CANDIDATES)
+    id_col = resolve_column(title_df, TITLE_ID_CANDIDATES)
     title_col = resolve_column(title_df, TITLE_NAME_CANDIDATES)
 
-    if email_col is None or title_col is None:
-        print(f"  Warning: Title file found but missing Email or Title column")
+    if id_col is None or title_col is None:
+        print(f"  Warning: Title file found but missing ID or Title column")
         print(f"           Columns: {list(title_df.columns)}")
         return None
 
-    result = title_df[[email_col, title_col]].copy()
-    result.columns = ["email", "title"]
-    result["email"] = result["email"].astype(str).str.strip().str.lower()
+    result = title_df[[id_col, title_col]].copy()
+    result.columns = ["id", "title"]
+    result["id"] = result["id"].astype(str).str.strip()
     result = result.dropna(subset=["title"])
-    result = result.drop_duplicates(subset=["email"], keep="first")
+    result = result.drop_duplicates(subset=["id"], keep="first")
     print(f"  Title lookup: {len(result)} entries")
     return result
 
@@ -240,15 +240,15 @@ def main():
         else:
             print(f"  Warning: optional column '{our_name}' not found (looked for {candidates})")
 
-    # If story_title is missing but author_email is present, try joining from Title lookup file
-    if "story_title" not in extra_mapped and "author_email" in extra_mapped:
+    # If story_title is missing, try joining from Title lookup file on ID
+    if "story_title" not in extra_mapped:
         print("\n  story_title not in main file — looking for Title lookup file...")
         title_lookup = load_title_lookup(input_file.parent)
         if title_lookup is not None:
-            email_col = extra_mapped["author_email"]
-            df["_join_email"] = df[email_col].astype(str).str.strip().str.lower()
-            df = df.merge(title_lookup, left_on="_join_email", right_on="email", how="left")
-            df.drop(columns=["_join_email", "email"], inplace=True)
+            id_col = mapped["story_id"]
+            df["_join_id"] = df[id_col].astype(str).str.strip()
+            df = df.merge(title_lookup, left_on="_join_id", right_on="id", how="left")
+            df.drop(columns=["_join_id", "id"], inplace=True)
             extra_mapped["story_title"] = "title"
             matched = df["title"].notna().sum()
             print(f"  Joined titles: {matched}/{len(df)} rows matched")
