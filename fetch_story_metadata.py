@@ -45,7 +45,7 @@ COLUMN_MAP = {
 
 # Additional columns to include in the output (optional — won't fail if missing)
 EXTRA_COLUMNS = {
-    "story_title": ["Story Title", "StoryTitle", "Title", "Titel", "title", "story_title"],
+    "story_title": ["Story Title", "StoryTitle", "Titel", "story_title"],
     "status_id": ["Status#Id", "StatusId", "Status_Id", "status#id"],
     "keys": ["*Keys"],  # suffix match — the only column ending in "Keys"
     "author_email": ["Email", "E-Mail", "email"],
@@ -244,6 +244,10 @@ def main():
         else:
             print(f"  Warning: optional column '{our_name}' not found (looked for {candidates})")
 
+    print(f"\n  Required columns mapped: {mapped}")
+    print(f"  Extra columns mapped: {extra_mapped}")
+    print(f"  story_title found in main file: {'story_title' in extra_mapped}")
+
     # If story_title is missing, try joining from Title lookup file on ID
     if "story_title" not in extra_mapped:
         print("\n  story_title not in main file — looking for Title lookup file...")
@@ -255,16 +259,16 @@ def main():
             df.drop(columns=["_join_id", "id"], inplace=True)
             extra_mapped["story_title"] = "title"
             matched = df["title"].notna().sum()
-            print(f"  Joined titles: {matched}/{len(df)} rows matched")
-            print(f"\n  {'ID':<8} {'Title':<60} {'Match'}")
-            print(f"  {'─'*8} {'─'*60} {'─'*5}")
+            print(f"  Joined titles: {matched}/{len(df)} rows matched", flush=True)
+            print(f"\n  {'ID':<8} {'Title':<60} {'Match'}", flush=True)
+            print(f"  {'─'*8} {'─'*60} {'─'*5}", flush=True)
             id_col_name = mapped["story_id"]
             for _, row in df.iterrows():
                 sid = str(row[id_col_name]).strip()
                 title = row.get("title", None)
-                status = "✓" if pd.notna(title) else "✗"
+                status = "OK" if pd.notna(title) else "MISS"
                 title_str = str(title)[:58] if pd.notna(title) else "(no match)"
-                print(f"  {sid:<8} {title_str:<60} {status}")
+                print(f"  {sid:<8} {title_str:<60} {status}", flush=True)
         else:
             print(f"  No Title lookup file found in {input_file.parent}/")
 
