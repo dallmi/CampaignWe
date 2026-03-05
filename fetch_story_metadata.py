@@ -295,7 +295,18 @@ def main():
             df.drop(columns=["_join_email", "email"], inplace=True)
             extra_mapped["author_country"] = "author_country"
             matched = df["author_country"].notna().sum()
-            print(f"  Country enrichment: {matched}/{len(df)} rows matched")
+            print(f"  Country enrichment: {matched}/{len(df)} rows matched", flush=True)
+            print(f"\n  {'ID':<8} {'Email':<40} {'Country':<30} {'Match'}", flush=True)
+            print(f"  {'─'*8} {'─'*40} {'─'*30} {'─'*5}", flush=True)
+            id_col_name = mapped["story_id"]
+            email_col_name = extra_mapped.get("author_email", None)
+            for _, row in df.iterrows():
+                sid = str(row[id_col_name]).strip()
+                email = str(row[email_col_name])[:38] if email_col_name else ""
+                country = row.get("author_country", None)
+                status = "OK" if pd.notna(country) else "MISS"
+                country_str = str(country)[:28] if pd.notna(country) else "(no match)"
+                print(f"  {sid:<8} {email:<40} {country_str:<30} {status}", flush=True)
         except Exception as e:
             print(f"  Warning: Could not enrich country: {e}")
     elif not HR_HISTORY_PATH.exists():
