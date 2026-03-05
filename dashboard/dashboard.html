@@ -756,13 +756,13 @@
         }
 
         // GCRS hierarchy drilldown
-        const GCRS_LEVELS = ['hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function'];
+        const GCRS_LEVELS = ['visitor_division','visitor_unit','visitor_area','visitor_sector','visitor_segment','visitor_function'];
         const GCRS_LABELS = ['Division','Unit','Area','Sector','Segment','Function'];
         let gcrsLevel = 0;
         let gcrsFilters = [];
 
         // Region → Country drilldown
-        const REGION_LEVELS = ['hr_region', 'hr_country'];
+        const REGION_LEVELS = ['visitor_region', 'visitor_country'];
         const REGION_LABELS = ['Region', 'Country'];
         let regionLevel = 0;
         let regionFilter = null; // selected region name, or null
@@ -1236,7 +1236,7 @@
                 SELECT COUNT(*) as events, COUNT(DISTINCT person_hash) as users, COUNT(DISTINCT session_key) as sessions,
                        COUNT(DISTINCT story_id) as stories,
                        ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as events_per_user,
-                       ROUND(100.0 * CAST(SUM(CASE WHEN hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) / COUNT(*), 1) as hr_pct
+                       ROUND(100.0 * CAST(SUM(CASE WHEN visitor_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) / COUNT(*), 1) as hr_pct
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
             const d = data[0] || {};
@@ -1502,7 +1502,7 @@
 
             let drillWhere = '';
             if (regionFilter) {
-                drillWhere = ` AND hr_region = '${String(regionFilter).replace(/'/g, "''")}'`;
+                drillWhere = ` AND visitor_region = '${String(regionFilter).replace(/'/g, "''")}'`;
             }
 
             // Check if column exists
@@ -1581,16 +1581,16 @@
 
         async function renderDivDaily() {
             const top5 = await q(`
-                SELECT COALESCE(hr_division, '(unknown)') as div FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL
+                SELECT COALESCE(visitor_division, '(unknown)') as div FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND visitor_division IS NOT NULL
                 GROUP BY 1 ORDER BY COUNT(DISTINCT person_hash) DESC LIMIT 5
             `);
             const divNames = top5.map(d => d.div);
             if (divNames.length === 0) { destroyChart('divDaily'); return; }
 
             const data = await q(`
-                SELECT session_date as date, COALESCE(hr_division, '(unknown)') as div, COUNT(DISTINCT person_hash) as users FROM events
-                WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IN (${divNames.map(d => `'${d.replace(/'/g,"''")}'`).join(',')})
+                SELECT session_date as date, COALESCE(visitor_division, '(unknown)') as div, COUNT(DISTINCT person_hash) as users FROM events
+                WHERE ${getDateWhere()}${getFilterWhere()} AND visitor_division IN (${divNames.map(d => `'${d.replace(/'/g,"''")}'`).join(',')})
                 GROUP BY 1, 2 ORDER BY 1
             `);
 
@@ -1612,7 +1612,7 @@
 
         async function renderDivDepthTable() {
             const data = await q(`
-                SELECT COALESCE(hr_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT person_hash) as users,
+                SELECT COALESCE(visitor_division, '(unknown)') as division, COUNT(*) as events, COUNT(DISTINCT person_hash) as users,
                        ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as events_per_user,
                        COUNT(DISTINCT story_id) as stories,
                        CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads,
@@ -1870,9 +1870,9 @@
             const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10),
-                     top_d AS (SELECT hr_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND hr_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_division as div, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
-                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_division IN (SELECT * FROM top_d)
+                     top_d AS (SELECT visitor_division FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND visitor_division IS NOT NULL GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
+                SELECT visitor_division as div, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND visitor_division IN (SELECT * FROM top_d)
                 GROUP BY 1, 2
             `);
             const stories = [...new Set(data.map(d => d.story_id))];
@@ -1891,8 +1891,8 @@
             const titleSelect = (await hasStoryTitle()) ? ", MAX(story_title) as story_title" : "";
             const data = await q(`
                 WITH top_s AS (SELECT story_id FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IS NOT NULL AND action_type='Read' GROUP BY 1 ORDER BY COUNT(*) DESC LIMIT 10)
-                SELECT hr_region as reg, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
-                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND hr_region IS NOT NULL
+                SELECT visitor_region as reg, story_id${titleSelect}, CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as reads
+                FROM events WHERE ${getDateWhere()}${getFilterWhere()} AND story_id IN (SELECT * FROM top_s) AND visitor_region IS NOT NULL
                 GROUP BY 1, 2
             `);
             const stories = [...new Set(data.map(d => d.story_id))];
@@ -1942,8 +1942,8 @@
         async function renderGpnCoverage() {
             const data = await q(`
                 SELECT
-                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND hr_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) as matched,
-                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND hr_division IS NULL THEN 1 ELSE 0 END) AS INTEGER) as unmatched,
+                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND visitor_division IS NOT NULL THEN 1 ELSE 0 END) AS INTEGER) as matched,
+                    CAST(SUM(CASE WHEN person_hash IS NOT NULL AND visitor_division IS NULL THEN 1 ELSE 0 END) AS INTEGER) as unmatched,
                     CAST(SUM(CASE WHEN person_hash IS NULL THEN 1 ELSE 0 END) AS INTEGER) as no_user
                 FROM events WHERE ${getDateWhere()}${getFilterWhere()}
             `);
@@ -1963,7 +1963,7 @@
         }
 
         async function renderFieldCoverage() {
-            const fields = ['person_hash','session_id','user_id','story_id','action_type','hr_division','hr_unit','hr_area','hr_sector','hr_segment','hr_function','hr_region','hr_country','hr_job_family','hr_management_level'];
+            const fields = ['person_hash','session_id','user_id','story_id','action_type','visitor_division','visitor_unit','visitor_area','visitor_sector','visitor_segment','visitor_function','visitor_region','visitor_country','visitor_job_family','visitor_management_level'];
             // Check which fields exist
             let existingCols;
             try { existingCols = (await q("DESCRIBE events")).map(d => d.column_name); } catch(e) { existingCols = []; }

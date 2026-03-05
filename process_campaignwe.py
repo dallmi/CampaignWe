@@ -721,12 +721,17 @@ def anonymize_events_table(con):
     cols_to_drop = [c for c in all_cols if c in drop_columns]
 
     select_parts = []
+    renamed_cols = []
     for c in all_cols:
         if c in drop_columns:
             continue
         if c in hash_columns:
             alias = c.replace('gpn', 'person_hash').replace('GPN', 'Person_Hash')
             select_parts.append(f"sha256(CAST({c} AS VARCHAR))::VARCHAR AS {alias}")
+        elif c.startswith('hr_'):
+            alias = 'visitor_' + c[3:]
+            select_parts.append(f'"{c}" AS {alias}')
+            renamed_cols.append(f"{c} -> {alias}")
         else:
             select_parts.append(c)
 
@@ -738,6 +743,8 @@ def anonymize_events_table(con):
         changes.append(f"hashed: {', '.join(cols_to_hash)}")
     if cols_to_drop:
         changes.append(f"dropped: {', '.join(cols_to_drop)}")
+    if renamed_cols:
+        changes.append(f"renamed: {', '.join(renamed_cols)}")
     log(f"  {'; '.join(changes) if changes else 'no PII columns found'}")
 
 
@@ -824,11 +831,11 @@ def print_summary(con, output_dir=None):
 
     # --- HR join coverage ---
     events_cols = con.execute("DESCRIBE events").df()['column_name'].tolist()
-    if 'hr_division' in events_cols:
+    if 'visitor_division' in events_cols:
         hr_coverage = con.execute("""
             SELECT
                 COUNT(*) as total,
-                COUNT(hr_division) as with_hr_data,
+                COUNT(visitor_division) as with_hr_data,
                 COUNT(person_hash) as with_gpn
             FROM events
         """).df().iloc[0]
@@ -842,26 +849,25 @@ def print_summary(con, output_dir=None):
         log(f"    Events with person hash:{with_gpn:>7,} / {total:,}  ({100.0 * with_gpn / total if total > 0 else 0:.1f}%)")
         log(f"    Events with HR data:   {with_hr:>8,} / {total:,}  ({100.0 * with_hr / total if total > 0 else 0:.1f}%)")
 
-        if 'hr_division' in events_cols:
-            divisions = con.execute("""
-                SELECT hr_division, COUNT(*) as cnt
-                FROM events
-                WHERE hr_division IS NOT NULL
-                GROUP BY hr_division
-                ORDER BY cnt DESC
-                LIMIT 10
-            """).df()
-            if len(divisions) > 0:
-                log("\n    Top divisions:")
-                for _, row in divisions.iterrows():
-                    log(f"      {str(row['hr_division']):<40s} {int(row['cnt']):>8,}")
+        divisions = con.execute("""
+            SELECT visitor_division, COUNT(*) as cnt
+            FROM events
+            WHERE visitor_division IS NOT NULL
+            GROUP BY visitor_division
+            ORDER BY cnt DESC
+            LIMIT 10
+        """).df()
+        if len(divisions) > 0:
+            log("\n    Top divisions:")
+            for _, row in divisions.iterrows():
+                log(f"      {str(row['visitor_division']):<40s} {int(row['cnt']):>8,}")
 
         # Show unmatched persons (have person_hash but no HR data)
         if with_gpn > with_hr:
             unmatched = con.execute("""
                 SELECT person_hash, COUNT(*) as cnt
                 FROM events
-                WHERE person_hash IS NOT NULL AND hr_division IS NULL
+                WHERE person_hash IS NOT NULL AND visitor_division IS NULL
                 GROUP BY person_hash
                 ORDER BY cnt DESC
                 LIMIT 15

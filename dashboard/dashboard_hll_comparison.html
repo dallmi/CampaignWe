@@ -451,8 +451,8 @@
     // Tab router
     // =========================================================================
     async function renderTab(name) {
-        if (name === 'division') await renderDimension('hr_division', 'Division', 'chartDivision', 'chartDivisionErr', 'tableDivision', 25);
-        if (name === 'region')   await renderDimension('hr_region',   'Region',   'chartRegion',   'chartRegionErr',   'tableRegion',   50);
+        if (name === 'division') await renderDimension('visitor_division', 'Division', 'chartDivision', 'chartDivisionErr', 'tableDivision', 25);
+        if (name === 'region')   await renderDimension('visitor_region',   'Region',   'chartRegion',   'chartRegionErr',   'tableRegion',   50);
         if (name === 'story')    await renderStory();
         if (name === 'trend')    await renderTrend();
     }

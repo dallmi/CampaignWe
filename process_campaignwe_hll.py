@@ -21,7 +21,7 @@ Input:
 Output:
     output/events_hll.parquet
         Columns: session_date, story_id, action_type,
-                 hr_division, hr_unit, hr_area, hr_sector, hr_region,
+                 visitor_division, visitor_unit, visitor_area, visitor_sector, visitor_region,
                  event_count, uv_sketch (BLOB)
         No GPN, no email, no person_hash.
 
@@ -30,12 +30,12 @@ Output:
 
     output/events_hll_powerbi.parquet
         Pre-computed UV for all 32 combinations of:
-            month × story_id × action_type × hr_division × hr_region
+            month × story_id × action_type × visitor_division × visitor_region
         Power BI fallback — no person_hash required.
 
 Pre-aggregation grain:
     session_date × story_id × action_type ×
-    hr_division × hr_unit × hr_area × hr_sector × hr_region
+    visitor_division × visitor_unit × visitor_area × visitor_sector × visitor_region
 
 HLL parameters: datasketch.HyperLogLog(p=12) — ~1.6% std error, 4096 registers.
 
@@ -290,15 +290,15 @@ def load_hr_history(con, hr_parquet_path):
 # Dropped (high-cardinality, low-value for UV): hr_segment, hr_function, hr_ou_code,
 # hr_country, hr_management_level, hr_job_family, hr_job_title, hr_cost_center.
 HLL_HR_FIELD_MAP = {
-    'gcrs_division_desc': 'hr_division',
-    'gcrs_unit_desc':     'hr_unit',
-    'gcrs_area_desc':     'hr_area',
-    'gcrs_sector_desc':   'hr_sector',
-    'work_location_region': 'hr_region',
+    'gcrs_division_desc': 'visitor_division',
+    'gcrs_unit_desc':     'visitor_unit',
+    'gcrs_area_desc':     'visitor_area',
+    'gcrs_sector_desc':   'visitor_sector',
+    'work_location_region': 'visitor_region',
 }
 
 GRAIN_DIMS = ['session_date', 'story_id', 'action_type',
-              'hr_division', 'hr_unit', 'hr_area', 'hr_sector', 'hr_region']
+              'visitor_division', 'visitor_unit', 'visitor_area', 'visitor_sector', 'visitor_region']
 
 
 def build_events_table(con, has_hr_history=False):
@@ -462,7 +462,7 @@ def export_uv_aggregates(df, output_dir):
     """Pre-compute HLL UV estimates at key dimensions and export for the browser.
 
     Produces events_hll_uv.parquet with columns:
-        dimension  VARCHAR  — 'hr_division', 'hr_unit', 'hr_region', 'story_id',
+        dimension  VARCHAR  — 'visitor_division', 'visitor_unit', 'visitor_region', 'story_id',
                                'action_type', 'month', 'overall'
         value      VARCHAR  — the dimension value
         event_count INTEGER — exact event count in that group
@@ -475,7 +475,7 @@ def export_uv_aggregates(df, output_dir):
     records = []
 
     # Per-dimension aggregations
-    for dim in ['hr_division', 'hr_unit', 'hr_region', 'story_id', 'action_type']:
+    for dim in ['visitor_division', 'visitor_unit', 'visitor_region', 'story_id', 'action_type']:
         if dim not in df.columns:
             continue
         for val, grp in df.groupby(dim, dropna=False):
@@ -513,9 +513,9 @@ def export_uv_aggregates(df, output_dir):
 # ---------------------------------------------------------------------------
 
 # Dimensions included in the power-set pre-computation.
-# Reduced HR set (hr_division + hr_region only) keeps the combination count
+# Reduced HR set (visitor_division + visitor_region only) keeps the combination count
 # manageable (2^5 = 32) while covering every Power BI slicer combination.
-_POWERBI_DIMS = ['month', 'story_id', 'action_type', 'hr_division', 'hr_region']
+_POWERBI_DIMS = ['month', 'story_id', 'action_type', 'visitor_division', 'visitor_region']
 
 
 def export_powerbi_aggregates(df, output_dir):
@@ -524,14 +524,14 @@ def export_powerbi_aggregates(df, output_dir):
     Produces events_hll_powerbi.parquet — a fallback dataset for Power BI that
     requires no person_hash column.  Each row carries pre-computed integer UV
     estimates for one specific grouping of:
-        month, story_id, action_type, hr_division, hr_region
+        month, story_id, action_type, visitor_division, visitor_region
 
     Schema:
         month        VARCHAR  — "YYYY-MM" or NULL (dimension not in this grouping)
         story_id     VARCHAR  — or NULL
         action_type  VARCHAR  — or NULL
-        hr_division  VARCHAR  — or NULL
-        hr_region    VARCHAR  — or NULL
+        visitor_division  VARCHAR  — or NULL
+        visitor_region    VARCHAR  — or NULL
         event_count  INTEGER  — exact event total for this cell
         hll_uv       INTEGER  — HLL UV estimate (merged sketches)
         grouping     VARCHAR  — comma-separated list of active dimensions
@@ -627,10 +627,10 @@ def compare_pipelines(output_dir):
     queries = [
         ("Overall UV",              None,                         None),
         ("UV by action_type",       'action_type',                None),
-        ("UV by hr_division",       'hr_division',                None),
+        ("UV by visitor_division",       'visitor_division',                None),
         ("UV by month",             'month',                      None),
         ("UV by story_id (top 10)", 'story_id',                   10),
-        ("UV by hr_division × action_type", ['hr_division', 'action_type'], None),
+        ("UV by visitor_division × action_type", ['visitor_division', 'action_type'], None),
     ]
 
     log("")
