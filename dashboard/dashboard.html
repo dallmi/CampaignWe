@@ -814,6 +814,20 @@
             const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
 
             async function load(view, file, msg) {
+                // First try registering via fetch + buffer (works with simple HTTP servers
+                // that don't support range requests needed by DuckDB-WASM's direct URL reads)
+                for (const p of paths) {
+                    try {
+                        const resp = await fetch(`${p}${file}`);
+                        if (!resp.ok) continue;
+                        const buf = new Uint8Array(await resp.arrayBuffer());
+                        await db.registerFileBuffer(file, buf);
+                        await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${file}')`);
+                        setLoadingText(msg);
+                        return;
+                    } catch(e) { /* try next path */ }
+                }
+                // Fallback: direct URL read (works with servers that support range requests)
                 for (const p of paths) {
                     try { await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${p}${file}')`); setLoadingText(msg); return; }
                     catch(e) { /* try next */ }
@@ -825,20 +839,39 @@
 
             // Load story metadata lookup (optional — silently skip if not found)
             try {
+                let metaLoaded = false;
+                const metaFile = 'story_metadata.parquet';
+                // Try fetch + buffer first, then direct URL
                 for (const p of paths) {
                     try {
-                        await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}story_metadata.parquet')`);
-                        const metaRows = (await conn.query('SELECT * FROM story_meta')).toArray();
-                        window._storyMeta = {};
-                        metaRows.forEach(r => {
-                            const email = r.author_email || r.email || null;
-                            window._storyMeta[String(r.story_id)] = { author_email: email, story_title: r.story_title || null };
-                        });
-                        console.log('Story metadata loaded:', metaRows.length, 'stories. Columns:', metaRows.length > 0 ? Object.keys(metaRows[0]) : '(empty)');
-                        console.log('Sample entry:', metaRows.length > 0 ? window._storyMeta[String(metaRows[0].story_id)] : '(none)');
-                        setLoadingText(`Loaded story metadata (${metaRows.length} stories)...`);
+                        const resp = await fetch(`${p}${metaFile}`);
+                        if (!resp.ok) continue;
+                        const buf = new Uint8Array(await resp.arrayBuffer());
+                        await db.registerFileBuffer(metaFile, buf);
+                        await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${metaFile}')`);
+                        metaLoaded = true;
                         break;
-                    } catch(e) { console.warn('Story metadata path failed:', p, e.message); }
+                    } catch(e) { /* try next */ }
+                }
+                if (!metaLoaded) {
+                    for (const p of paths) {
+                        try {
+                            await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}${metaFile}')`);
+                            metaLoaded = true;
+                            break;
+                        } catch(e) { console.warn('Story metadata path failed:', p, e.message); }
+                    }
+                }
+                if (metaLoaded) {
+                    const metaRows = (await conn.query('SELECT * FROM story_meta')).toArray();
+                    window._storyMeta = {};
+                    metaRows.forEach(r => {
+                        const email = r.author_email || r.email || null;
+                        window._storyMeta[String(r.story_id)] = { author_email: email, story_title: r.story_title || null };
+                    });
+                    console.log('Story metadata loaded:', metaRows.length, 'stories. Columns:', metaRows.length > 0 ? Object.keys(metaRows[0]) : '(empty)');
+                    console.log('Sample entry:', metaRows.length > 0 ? window._storyMeta[String(metaRows[0].story_id)] : '(none)');
+                    setLoadingText(`Loaded story metadata (${metaRows.length} stories)...`);
                 }
             } catch(e) { /* story_metadata not available — labels will fall back to Story ID */ }
         }

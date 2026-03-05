@@ -398,6 +398,19 @@
         const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
 
         async function load(view, file, msg) {
+            // Try fetch + buffer first (works with simple HTTP servers without range request support)
+            for (const p of paths) {
+                try {
+                    const resp = await fetch(`${p}${file}`);
+                    if (!resp.ok) continue;
+                    const buf = new Uint8Array(await resp.arrayBuffer());
+                    await db.registerFileBuffer(file, buf);
+                    await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${file}')`);
+                    setLoadingText(msg);
+                    return;
+                } catch(e) { /* try next path */ }
+            }
+            // Fallback: direct URL read (servers with range request support)
             for (const p of paths) {
                 try {
                     await conn.query(`CREATE VIEW ${view} AS SELECT * FROM read_parquet('${p}${file}')`);
