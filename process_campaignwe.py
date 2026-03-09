@@ -754,12 +754,28 @@ def export_parquet_files(con, output_dir):
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Anonymized export (GPN already hashed, email already dropped by anonymize_events_table)
+    # Anonymized export — only events with a known story (matched in story_metadata)
     anonymized_file = output_dir / 'events_anonymized.parquet'
     if anonymized_file.exists():
         anonymized_file.unlink()
-    con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
-    row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
+
+    # Check if story_title column exists (set by story metadata join)
+    evt_cols = [r[0] for r in con.execute("DESCRIBE events").fetchall()]
+    has_story_title = 'story_title' in evt_cols
+
+    if has_story_title:
+        total_before = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        con.execute(f"""
+            COPY (SELECT * FROM events WHERE story_id IS NOT NULL AND story_title IS NOT NULL)
+            TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)
+        """)
+        row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
+        excluded = total_before - row_count
+        log(f"  Filtered to known stories: {row_count:,} rows kept, {excluded:,} excluded (no story metadata)")
+    else:
+        con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
+        row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
+
     size_mb = os.path.getsize(anonymized_file) / (1024 * 1024)
     log(f"  events_anonymized.parquet ({row_count:,} rows, {size_mb:.1f} MB)")
 
