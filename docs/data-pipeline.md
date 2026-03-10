@@ -2,7 +2,7 @@
 
 ## Overview
 
-This pipeline processes click data extracted from Azure Application Insights for the GWM Prompt Library page. It ingests KQL exports (`.xlsx` or `.csv`), enriches them with organisational data, computes derived metrics, and exports Parquet files for reporting.
+This pipeline processes click data extracted from Azure Application Insights for an internal employee engagement campaign page. It ingests KQL exports (`.xlsx` or `.csv`), enriches them with organisational data, computes derived metrics, and exports Parquet files for reporting.
 
 > **Terminology**: Every record in this pipeline represents a **click** — a user clicking a link, button, or story on the page. The source Application Insights event type is `click_event`. Database tables and columns use the name `events` (inherited from App Insights conventions), but these are always click events.
 
