@@ -216,7 +216,9 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 |--------------------------|---------------|-------------|
 | `%Share your story%` | **Open Form** | User opened the story submission form |
 | `%Submit%` | **Submit** | User submitted a story |
-| `%Cancel%` | **Cancel** | User cancelled/closed the submission form |
+| `%Send Invite%` | **Send Invite** | User sent an invite to a colleague |
+| `%Invite your colleagues%` | **Open Invite** | User opened the invite form |
+| `%Cancel%` | **Cancel** | User cancelled/closed a form |
 | `%Read%` | **Read** | User opened/expanded a story |
 | `%like%` | **Like** | User liked content |
 | Anything else | **Other** | Unclassified click (excluded from reporting) |

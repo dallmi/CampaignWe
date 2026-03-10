@@ -378,6 +378,8 @@ def build_events_table(con, has_hr_history=False):
             CASE
                 WHEN r."{link_label_col}" ILIKE '%Share your story%' THEN 'Open Form'
                 WHEN r."{link_label_col}" ILIKE '%Submit%'           THEN 'Submit'
+                WHEN r."{link_label_col}" ILIKE '%Send Invite%'      THEN 'Send Invite'
+                WHEN r."{link_label_col}" ILIKE '%Invite your colleagues%' THEN 'Open Invite'
                 WHEN r."{link_label_col}" ILIKE '%Cancel%'           THEN 'Cancel'
                 WHEN r."{link_label_col}" ILIKE '%Read%'             THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%'             THEN 'Like'
