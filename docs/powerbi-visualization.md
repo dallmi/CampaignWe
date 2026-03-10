@@ -225,6 +225,13 @@ DIVIDE(
     0
 )
 
+Invite Conversion % =
+DIVIDE(
+    [Send Invites],
+    [Open Invites],
+    0
+) * 100
+
 Clicks per Visitor (Division Table) =
 DIVIDE(
     [Total Clicks],
@@ -851,6 +858,8 @@ Send Invites = CALCULATE([Total Clicks], Events[action_type] = "Send Invite")
 // ═══════════════════════════════════════════
 
 Views per Visitor = DIVIDE([Views], [Unique Visitors], 0)
+
+Invite Conversion % = DIVIDE([Send Invites], [Open Invites], 0) * 100
 
 Unique Visitors =
 CALCULATE(DISTINCTCOUNT(Events[person_hash]), Events[action_type] = "Read")
