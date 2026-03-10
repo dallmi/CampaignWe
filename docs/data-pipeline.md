@@ -223,9 +223,22 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 | `%like%` | **Like** | User liked content |
 | Anything else | **Other** | Unclassified click (excluded from reporting) |
 
-**Other** groups clicks that add no analytical value: closing a story after reading it (`close`), editing form fields (`edit`), browsing/pagination (`See more stories`, pure digit clicks), and events with no label (`NULL`). These are retained in the data for completeness but excluded from reporting views.
+**Other** groups clicks that add no analytical value: closing a story after reading it (`close`), editing form fields (`edit`), browsing/pagination (`See more stories`, pure digit clicks), and events with no label (`NULL`). The processing summary shows all distinct "Other" labels with counts for review.
 
 The `story_id` is extracted from the leading digits in `CP_Link_label` — e.g., `"15Read full story"` yields `story_id = 15`.
+
+#### Export Filter
+
+The anonymized export (`events_anonymized.parquet`) applies these rules:
+
+| Action Type | Included? | Condition |
+|-------------|-----------|-----------|
+| Read, Like | Yes | Only if `story_id` matches a known story in `story_metadata.parquet` |
+| Open Form, Submit, Cancel | Yes | Always (story creation funnel) |
+| Send Invite, Open Invite | Yes | Always (invite funnel) |
+| Other | No | Always excluded |
+
+This ensures clean funnel analysis while filtering out noise. The raw database retains all events for diagnostics.
 
 #### Views per Visitor
 
@@ -242,7 +255,7 @@ This is the average number of story-open clicks per unique visitor within a give
 | File | Contents | Grain |
 |------|----------|-------|
 | `events_raw.parquet` | All events with raw identifiers and org columns (internal use only) | One row per event |
-| `events_anonymized.parquet` | Primary export: identifiers hashed/dropped, `visitor_*` org fields | One row per event |
+| `events_anonymized.parquet` | Primary export: filtered to known stories + funnel actions, identifiers hashed/dropped, `visitor_*` org fields | One row per event |
 | `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info, keys | One row per story |
 
 ---

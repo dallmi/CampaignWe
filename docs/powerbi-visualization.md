@@ -209,6 +209,10 @@ Open Forms = CALCULATE([Total Clicks], Events[action_type] = "Open Form")
 Submits = CALCULATE([Total Clicks], Events[action_type] = "Submit")
 
 Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
+
+Open Invites = CALCULATE([Total Clicks], Events[action_type] = "Open Invite")
+
+Send Invites = CALCULATE([Total Clicks], Events[action_type] = "Send Invite")
 ```
 
 ### Engagement Metrics
@@ -836,6 +840,10 @@ Open Forms = CALCULATE([Total Clicks], Events[action_type] = "Open Form")
 Submits = CALCULATE([Total Clicks], Events[action_type] = "Submit")
 
 Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
+
+Open Invites = CALCULATE([Total Clicks], Events[action_type] = "Open Invite")
+
+Send Invites = CALCULATE([Total Clicks], Events[action_type] = "Send Invite")
 
 
 // ═══════════════════════════════════════════
