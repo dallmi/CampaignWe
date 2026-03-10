@@ -783,13 +783,18 @@ def process_campaignwe_hll(run_compare=False):
         if st_type and st_type[0] != 'VARCHAR':
             con.execute("ALTER TABLE story_titles ALTER story_id TYPE VARCHAR")
         before = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+        # Keep: events with known story metadata OR non-story actions (invite, form, cancel)
+        # Exclude: "Other" action type and story events without metadata
         con.execute("""
             DELETE FROM events
-            WHERE story_id IS NULL
-               OR story_id NOT IN (SELECT story_id FROM story_titles)
+            WHERE action_type = 'Other'
+               OR (
+                   action_type NOT IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite')
+                   AND (story_id IS NULL OR story_id NOT IN (SELECT story_id FROM story_titles))
+               )
         """)
         after = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-        log(f"  Filtered to known stories: {after:,} rows kept, {before - after:,} excluded")
+        log(f"  Filtered: {after:,} rows kept, {before - after:,} excluded (Other + unmatched stories)")
         con.execute("DROP TABLE story_titles")
     else:
         log(f"  WARNING: {story_meta_path} not found — no story filter applied")

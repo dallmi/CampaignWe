@@ -766,14 +766,23 @@ def export_parquet_files(con, output_dir):
     has_story_title = 'story_title' in evt_cols
 
     if has_story_title:
+        # Keep: events with known story metadata OR non-story actions (invite, form, cancel)
+        # Exclude: "Other" action type and story events without metadata
         total_before = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         con.execute(f"""
-            COPY (SELECT * FROM events WHERE story_id IS NOT NULL AND story_title IS NOT NULL)
+            COPY (
+                SELECT * FROM events
+                WHERE action_type != 'Other'
+                  AND (
+                    (story_id IS NOT NULL AND story_title IS NOT NULL)
+                    OR action_type IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite')
+                  )
+            )
             TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)
         """)
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
         excluded = total_before - row_count
-        log(f"  Filtered to known stories: {row_count:,} rows kept, {excluded:,} excluded (no story metadata)")
+        log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched stories)")
     else:
         con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
@@ -951,15 +960,14 @@ def print_summary(con, output_dir=None):
             ll_col = next((c for c in ['CP_Link_label', 'CP_link_label'] if c in events_cols), None)
             if ll_col:
                 other_samples = con.execute(f"""
-                    SELECT "{ll_col}" as label, COUNT(*) as cnt
+                    SELECT COALESCE("{ll_col}", '(NULL)') as label, COUNT(*) as cnt
                     FROM events
                     WHERE action_type = 'Other'
                     GROUP BY 1
                     ORDER BY cnt DESC
-                    LIMIT 10
                 """).df()
                 if len(other_samples) > 0:
-                    log(f"\n    Sample 'Other' labels ({other_count:,} total):")
+                    log(f"\n    All 'Other' labels ({other_count:,} events, {len(other_samples)} distinct):")
                     for _, row in other_samples.iterrows():
                         label_preview = str(row['label'])[:60]
                         log(f"      {label_preview:<60s} {int(row['cnt']):>6,}")
