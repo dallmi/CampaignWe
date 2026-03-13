@@ -272,45 +272,80 @@ def main():
         else:
             print(f"  No Title lookup file found in {input_file.parent}/")
 
-    # Enrich with country from hr_history.parquet (e_mail_address -> work_location_country)
+    # Enrich with HR data from hr_history.parquet (e_mail_address -> country, sector, area, unit)
+    HR_ENRICH_FIELDS = {
+        "work_location_country": "author_country",
+        "gcrs_sector_desc": "author_business_sector",
+        "gcrs_area_desc": "author_area",
+        "gcrs_unit_desc": "author_unit",
+    }
+
     if "author_email" in extra_mapped and HR_HISTORY_PATH.exists():
-        print("\n  Enriching with country from hr_history.parquet...")
+        print("\n  Enriching with HR data from hr_history.parquet...")
         try:
+            # Read only the columns we need (skip any that don't exist in the file)
+            import pyarrow.parquet as pq
+            available_cols = set(pq.read_schema(HR_HISTORY_PATH).names)
+            hr_src_cols = [c for c in HR_ENRICH_FIELDS if c in available_cols]
+            missing_hr_cols = [c for c in HR_ENRICH_FIELDS if c not in available_cols]
+            if missing_hr_cols:
+                print(f"  Warning: HR columns not in file: {missing_hr_cols}")
+
             hr = pd.read_parquet(HR_HISTORY_PATH,
-                                 columns=["e_mail_address", "work_location_country",
-                                          "snapshot_year", "snapshot_month"])
-            hr = hr.dropna(subset=["e_mail_address", "work_location_country"])
+                                 columns=["e_mail_address", "snapshot_year", "snapshot_month"] + hr_src_cols)
+            hr = hr.dropna(subset=["e_mail_address"])
             # Keep only the latest snapshot to avoid duplicates
             latest = hr.nlargest(1, ["snapshot_year", "snapshot_month"])[["snapshot_year", "snapshot_month"]].iloc[0]
             hr = hr[(hr["snapshot_year"] == latest["snapshot_year"]) &
                     (hr["snapshot_month"] == latest["snapshot_month"])]
             hr["e_mail_address"] = hr["e_mail_address"].astype(str).str.strip().str.lower()
-            country_map = hr[["e_mail_address", "work_location_country"]].drop_duplicates(subset=["e_mail_address"], keep="first")
-            country_map.columns = ["email", "author_country"]
+
+            # Build lookup: email + all available HR fields
+            lookup_cols = ["e_mail_address"] + hr_src_cols
+            hr_lookup = hr[lookup_cols].drop_duplicates(subset=["e_mail_address"], keep="first")
+            rename_map = {"e_mail_address": "_hr_email"}
+            rename_map.update({src: HR_ENRICH_FIELDS[src] for src in hr_src_cols})
+            hr_lookup = hr_lookup.rename(columns=rename_map)
             print(f"  Using HR snapshot {int(latest['snapshot_year'])}-{int(latest['snapshot_month']):02d}")
+            print(f"  HR fields enriched: {[HR_ENRICH_FIELDS[c] for c in hr_src_cols]}")
 
             email_col = extra_mapped["author_email"]
             df["_join_email"] = df[email_col].astype(str).str.strip().str.lower()
-            df = df.merge(country_map, left_on="_join_email", right_on="email", how="left")
-            df.drop(columns=["_join_email", "email"], inplace=True)
-            extra_mapped["author_country"] = "author_country"
-            matched = df["author_country"].notna().sum()
-            print(f"  Country enrichment: {matched}/{len(df)} rows matched", flush=True)
-            print(f"\n  {'ID':<8} {'Email':<40} {'Country':<30} {'Match'}", flush=True)
-            print(f"  {'─'*8} {'─'*40} {'─'*30} {'─'*5}", flush=True)
+            df = df.merge(hr_lookup, left_on="_join_email", right_on="_hr_email", how="left")
+            df.drop(columns=["_join_email", "_hr_email"], inplace=True)
+
+            # Register enriched columns in extra_mapped
+            for src in hr_src_cols:
+                alias = HR_ENRICH_FIELDS[src]
+                extra_mapped[alias] = alias
+
+            # Diagnostic output
+            matched = df[HR_ENRICH_FIELDS[hr_src_cols[0]]].notna().sum() if hr_src_cols else 0
+            print(f"  HR enrichment: {matched}/{len(df)} rows matched", flush=True)
+            enriched_aliases = [HR_ENRICH_FIELDS[c] for c in hr_src_cols]
+            header_fields = " ".join(f"{a:<20}" for a in enriched_aliases)
+            print(f"\n  {'ID':<8} {'Email':<40} {header_fields} {'Match'}", flush=True)
+            print(f"  {'─'*8} {'─'*40} {' '.join('─'*20 for _ in enriched_aliases)} {'─'*5}", flush=True)
             id_col_name = mapped["story_id"]
             email_col_name = extra_mapped.get("author_email", None)
             for _, row in df.iterrows():
                 sid = str(row[id_col_name]).strip()
                 email = str(row[email_col_name])[:38] if email_col_name else ""
-                country = row.get("author_country", None)
-                status = "OK" if pd.notna(country) else "MISS"
-                country_str = str(country)[:28] if pd.notna(country) else "(no match)"
-                print(f"  {sid:<8} {email:<40} {country_str:<30} {status}", flush=True)
+                vals = []
+                any_matched = False
+                for alias in enriched_aliases:
+                    v = row.get(alias, None)
+                    if pd.notna(v):
+                        vals.append(f"{str(v)[:18]:<20}")
+                        any_matched = True
+                    else:
+                        vals.append(f"{'(no match)':<20}")
+                status = "OK" if any_matched else "MISS"
+                print(f"  {sid:<8} {email:<40} {' '.join(vals)} {status}", flush=True)
         except Exception as e:
-            print(f"  Warning: Could not enrich country: {e}")
+            print(f"  Warning: Could not enrich HR data: {e}")
     elif not HR_HISTORY_PATH.exists():
-        print(f"  Info: {HR_HISTORY_PATH} not found, skipping country enrichment")
+        print(f"  Info: {HR_HISTORY_PATH} not found, skipping HR enrichment")
 
     # Build result with required + extra columns
     src_cols = [mapped["story_id"], mapped["story_text"]]
@@ -353,6 +388,18 @@ def main():
         print(f"  Filtered {FILTER_COLUMN} == {FILTER_VALUE}: {before} -> {len(result)} rows")
     else:
         print(f"  Warning: filter column '{FILTER_COLUMN}' not available, skipping filter")
+
+    # Split comma-separated keys into story_key1, story_key2, story_key3
+    if "keys" in result.columns:
+        split_keys = result["keys"].fillna("").str.split(",", expand=True, n=2)
+        for i in range(3):
+            col = f"story_key{i+1}"
+            result[col] = split_keys[i].str.strip() if i in split_keys.columns else ""
+
+    # Convert date columns to proper date types
+    for date_col in ["created", "modified"]:
+        if date_col in result.columns:
+            result[date_col] = pd.to_datetime(result[date_col], errors="coerce").dt.date
 
     # Clean up
     result["story_id"] = result["story_id"].astype(str).str.strip()

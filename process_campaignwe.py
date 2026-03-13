@@ -619,11 +619,8 @@ def add_calculated_columns(con, has_hr_history=False):
             {gpn_expr} as gpn,
             {email_expr} as email,
             {story_sql}
-            -- Timestamp as string for reporting (UTC)
-            STRFTIME(r.timestamp, '%Y-%m-%d %H:%M:%S.%g') as timestamp_str,
             -- CET timestamp (convert UTC to Europe/Berlin)
             ((r.timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Berlin')::TIMESTAMP as timestamp_cet,
-            STRFTIME((r.timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Berlin', '%Y-%m-%d %H:%M:%S.%g') as timestamp_cet_str,
             -- Session columns (CET-based)
             DATE_TRUNC('day', (r.timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Berlin')::DATE as session_date,
             COALESCE(CAST(DATE_TRUNC('day', (r.timestamp AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Berlin')::DATE AS VARCHAR), '') || '_' ||
@@ -972,22 +969,6 @@ def print_summary(con, output_dir=None):
                         label_preview = str(row['label'])[:60]
                         log(f"      {label_preview:<60s} {int(row['cnt']):>6,}")
 
-    # --- Link type breakdown ---
-    link_type_col = next((c for c in ['CP_Link_Type', 'CP_link_type', 'CP_LinkType'] if c in events_cols), None)
-    if link_type_col:
-        lt_df = con.execute(f"""
-            SELECT COALESCE("{link_type_col}", '(blank)') as link_type, COUNT(*) as cnt,
-                   ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) as pct
-            FROM events
-            GROUP BY 1
-            ORDER BY cnt DESC
-        """).df()
-
-        log("\n  LINK TYPES (CP_Link_Type)")
-        log("  " + "-" * 60)
-        for _, row in lt_df.iterrows():
-            log(f"    {row['link_type']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
-
     # --- Story engagement ---
     if 'story_id' in events_cols and 'action_type' in events_cols:
         story_stats = con.execute("""
@@ -1265,6 +1246,15 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
                 UPDATE events SET story_keys = st.keys
                 FROM story_titles st WHERE events.story_id = st.story_id;
             """)
+            # Split comma-separated keys into story_key1, story_key2, story_key3
+            has_key_cols = 'story_key1' in st_cols
+            if has_key_cols:
+                for k in ['story_key1', 'story_key2', 'story_key3']:
+                    con.execute(f"""
+                        ALTER TABLE events ADD COLUMN IF NOT EXISTS {k} VARCHAR;
+                        UPDATE events SET {k} = st.{k}
+                        FROM story_titles st WHERE events.story_id = st.story_id;
+                    """)
         has_st_text = 'story_text' in st_cols
         has_st_title = 'story_title' in st_cols
         if has_st_text and has_st_title:
