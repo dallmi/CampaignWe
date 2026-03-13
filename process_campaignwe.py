@@ -714,7 +714,15 @@ def anonymize_events_table(con):
     all_cols = schema['column_name'].tolist()
 
     hash_columns = {'gpn', 'CP_GPN'}
-    drop_columns = {'email', 'CP_Email'}
+    drop_columns = {
+        'email', 'CP_Email',
+        # Unused CP_* columns — not referenced in PowerBI or dashboard
+        'CP_ContentType', 'CP_FileName_Label', 'CP_Filetype_Label',
+        'CP_FileType_Label', 'CP_Link_ancestors', 'CP_Link_Type',
+        'CP_Link_type', 'CP_NewsCategory',
+        'CP_pageId', 'CP_PageStatus', 'CP_PageURL',
+        'CP_TargetOrganisation', 'CP_TargetRegion',
+    }
 
     cols_to_hash = [c for c in all_cols if c in hash_columns]
     cols_to_drop = [c for c in all_cols if c in drop_columns]
