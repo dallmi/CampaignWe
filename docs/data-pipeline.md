@@ -63,8 +63,6 @@ CSV preserves the full `dd/MM/yyyy HH:mm:ss.fffffff` timestamp from App Insights
 | `CP_GPN` / `CP_gpn` | CustomProps | Global Personnel Number (8 digits) |
 | `CP_Email` | CustomProps | User email |
 | `CP_Link_label` | CustomProps | Parsed for story_id and action_type |
-| `CP_Link_Type` | CustomProps | Type of link clicked |
-| `CP_PageURL`, `CP_SiteID`, ... | CustomProps | Page metadata |
 
 ---
 
@@ -256,7 +254,7 @@ This is the average number of story-open clicks per unique visitor within a give
 |------|----------|-------|
 | `events_raw.parquet` | All events with raw identifiers and org columns (internal use only) | One row per event |
 | `events_anonymized.parquet` | Primary export: filtered to known stories + funnel actions, identifiers hashed/dropped, `visitor_*` org fields | One row per event |
-| `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info, keys | One row per story |
+| `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info (email, division, department, job title, country, business sector, area, unit), keys | One row per story |
 
 ---
 

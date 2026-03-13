@@ -51,7 +51,7 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
    - Events: All `visitor_*` columns → **Text**
    - Events: All count columns → **Whole Number**
    - StoryMeta: `story_id` → **Text** (to match Events[story_id] after cast)
-   - StoryMeta: `author_email`, `author_division`, `author_department`, `author_job_title` → **Text**
+   - StoryMeta: `author_email`, `author_division`, `author_department`, `author_job_title`, `author_country`, `author_business_sector`, `author_area`, `author_unit` → **Text**
 
 All dashboard visuals run against event-level data. The StoryMeta table provides story labels and author information.
 
@@ -83,7 +83,6 @@ The Power BI semantic model consists of connected tables (with relationships), d
 │               │     │                                 │
 │               │     │ ── Calculated Columns ───────── │
 │               │     │ Action Type Display             │
-│               │     │ Link Type Display               │
 │               │     │ Story Label (via RELATED)       │
 │               │     │ Division Display                │
 │               │     │ Region Display                  │
@@ -282,7 +281,7 @@ DIVIDE(
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
+│  [Date Slicer]  [Action Type Slicer]                             │
 ├──────────┬──────────┬──────────┬──────────┬──────────┬──────────┤
 │  Total   │ Unique   │  Unique  │  Unique  │ Clicks / │   Org    │
 │  Clicks  │ Visitors │ Sessions │ Stories  │ Visitor  │ Coverage │
@@ -292,9 +291,7 @@ DIVIDE(
 │     Clicks by Hour (bar)           │  Clicks by Weekday (bar)  │
 ├────────────────────────────────────┤────────────────────────────┤
 │  Activity Heatmap (Weekday×Hour)   │  Action Types (doughnut)  │
-├────────────────────────────────────┴────────────────────────────┤
-│              Link Types (horizontal bar)                        │
-└─────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────┴────────────────────────────┘
 ```
 
 ### 5.1 KPI Cards
@@ -414,24 +411,6 @@ Action Type Display = IF(ISBLANK(Events[action_type]), "(null)", Events[action_t
 
 Use `Action Type Display` as the legend field.
 
-### 5.7 Link Types (Horizontal Bar)
-
-**Visual type**: Clustered bar chart (horizontal)
-
-| Setting | Value |
-|---------|-------|
-| Y-axis | Events[CP_Link_Type] |
-| X-axis | `[Total Clicks]` |
-| Bar color | `#5A5D5C` |
-| Data labels | On |
-| Sort | Descending by value |
-
-Handle blanks similarly:
-
-```dax
-Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
-```
-
 ---
 
 ## 6. Page 2 — Divisions & Regions
@@ -440,7 +419,7 @@ Link Type Display = IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
+│  [Date Slicer]  [Action Type Slicer]                             │
 ├─────────────────────────────────┬───────────────────────────────┤
 │  Division Drilldown (bar)       │  Region → Country (bar)      │
 ├─────────────────────────────────┴───────────────────────────────┤
@@ -533,7 +512,7 @@ Colors will auto-assign from the 20-color theme palette.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  [Date Slicer]  [Action Type Slicer]  [Link Type Slicer]       │
+│  [Date Slicer]  [Action Type Slicer]                             │
 ├─────────────────────────────────┬───────────────────────────────┤
 │  Top Stories by Views (bar)     │  Top Stories by Visitors (bar) │
 ├─────────────────────────────────┴───────────────────────────────┤
@@ -780,27 +759,16 @@ Power BI does not natively support named presets (7d, 14d, 30d, etc.), but you c
 | Selection | Single select or multi-select |
 | Style | Tile or List |
 
-### Link Type Slicer
-
-**Visual type**: Slicer
-
-| Setting | Value |
-|---------|-------|
-| Field | Events[CP_Link_Type] (or Link Type Display) |
-| Style | Dropdown (saves space) |
-
 ### Cross-Filtering Behavior
 
 By default, Power BI cross-filters between visuals on the same page:
 - Clicking a doughnut slice filters the entire page to that action type
-- Clicking a bar in Link Types filters to that link type
 - Clicking a division bar filters stories, etc.
 
 To control cross-filtering: select a visual → Format → Edit interactions → choose Filter/Highlight/None for each other visual.
 
 **Recommended interactions**:
 - Action Type doughnut → **Filter** all other visuals
-- Link Type bar → **Filter** all other visuals
 - Division bar → **Filter** story visuals (when on same page)
 - Date slicer → **Filter** everything
 
@@ -933,9 +901,6 @@ IF(MAX(Events[event_weekday_num]) >= 6, "#CCCABC", "#5A5D5C")
 Action Type Display =
 IF(ISBLANK(Events[action_type]), "(null)", Events[action_type])
 
-Link Type Display =
-IF(ISBLANK(Events[CP_Link_Type]), "(blank)", Events[CP_Link_Type])
-
 Story Label =
 IF(
     ISBLANK(Events[story_id]),
@@ -1023,6 +988,6 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 7. [ ] Build Page 2 (Divisions & Regions) — organisational hierarchy, region drilldown, table
 8. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
 9. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
-10. [ ] Add slicers (Date, Action Type, Link Type) to each page
+10. [ ] Add slicers (Date, Action Type) to each page
 11. [ ] Configure cross-filter interactions between visuals
 12. [ ] Test drill-down on Division and Region charts
