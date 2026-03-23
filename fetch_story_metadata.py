@@ -5,6 +5,10 @@ The CSV is automatically synced by a Power Automate flow from a SharePoint list
 into a OneDrive folder. This script reads it, filters active stories (Status#Id = 1),
 and saves story_metadata.parquet with ID, title, and author metadata columns.
 
+Soft-delete: Stories that were present in a previous run but are no longer in the
+SharePoint list are marked with a deleted_date (date of disappearance) and kept in
+the output. This preserves historical analytics data up to the deletion date.
+
 If the main file has no story_title column but does have an Email column,
 the script looks for a separate "Title*.csv" or "Title*.xlsx" file in the
 same folder. It joins on Email to enrich the data with display names/titles.
@@ -21,6 +25,7 @@ Prerequisites:
     pip install pandas pyarrow openpyxl
 """
 
+import datetime
 import json
 import os
 import sys
@@ -408,6 +413,10 @@ def main():
 
     print(f"  Mapped {len(result)} stories")
 
+    # Add status column for active stories
+    result["status"] = "active"
+    result["deleted_date"] = pd.NaT
+
     if preview or result.empty:
         print("\n--- Story Titles ---")
         print(result.to_string(index=False))
@@ -416,8 +425,62 @@ def main():
         return
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Soft-delete: merge with existing parquet to preserve deleted stories
+    if not OUTPUT_PATH.exists():
+        print(f"\n  WARNING: No existing {OUTPUT_PATH.name} found.")
+        print(f"           Deleted story history will not be preserved.")
+        print(f"           If this is a first run, this is expected.")
+
+    if OUTPUT_PATH.exists():
+        existing = pd.read_parquet(OUTPUT_PATH)
+        existing["story_id"] = existing["story_id"].astype(str).str.strip()
+
+        # Ensure columns exist in existing data (backward compat with old parquet)
+        if "status" not in existing.columns:
+            existing["status"] = "active"
+        if "deleted_date" not in existing.columns:
+            existing["deleted_date"] = pd.NaT
+
+        active_ids = set(result["story_id"].tolist())
+        existing_ids = set(existing["story_id"].tolist())
+
+        # Stories that were in existing but are NOT in current fetch → newly deleted
+        newly_deleted_ids = existing_ids - active_ids
+        # Stories that were already marked deleted previously
+        previously_deleted = existing[existing["status"] == "deleted"]
+
+        if newly_deleted_ids:
+            today = datetime.date.today()
+            newly_deleted = existing[
+                (existing["story_id"].isin(newly_deleted_ids)) &
+                (existing["status"] != "deleted")  # don't re-mark already deleted
+            ].copy()
+            newly_deleted["status"] = "deleted"
+            newly_deleted["deleted_date"] = today
+            print(f"  Soft-deleted {len(newly_deleted)} stories (no longer in SharePoint): "
+                  f"IDs {sorted(newly_deleted_ids)}")
+
+            # Combine: current active + newly deleted + previously deleted
+            result = pd.concat([result, newly_deleted, previously_deleted],
+                               ignore_index=True)
+        elif len(previously_deleted) > 0:
+            # No new deletions, but carry forward previously deleted stories
+            result = pd.concat([result, previously_deleted], ignore_index=True)
+            print(f"  Carrying forward {len(previously_deleted)} previously deleted stories")
+
+        # Deduplicate by story_id (active takes precedence if a deleted story reappears)
+        result = result.sort_values("status", ascending=True)  # "active" before "deleted"
+        result = result.drop_duplicates(subset=["story_id"], keep="first")
+
+    # Convert deleted_date to proper date type
+    result["deleted_date"] = pd.to_datetime(result["deleted_date"], errors="coerce").dt.date
+
     result.to_parquet(OUTPUT_PATH, index=False)
-    print(f"\nSaved {len(result)} stories to {OUTPUT_PATH}")
+    active_count = (result["status"] == "active").sum()
+    deleted_count = (result["status"] == "deleted").sum()
+    print(f"\nSaved {len(result)} stories to {OUTPUT_PATH} "
+          f"({active_count} active, {deleted_count} deleted)")
 
 
 if __name__ == "__main__":

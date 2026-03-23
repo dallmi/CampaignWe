@@ -770,14 +770,24 @@ def export_parquet_files(con, output_dir):
     evt_cols = [r[0] for r in con.execute("DESCRIBE events").fetchall()]
     has_story_title = 'story_title' in evt_cols
 
+    # Check if story_deleted_date column exists (set by soft-delete metadata)
+    has_deleted_date = 'story_deleted_date' in evt_cols
+
     if has_story_title:
         # Keep: events with known story metadata OR non-story actions (invite, form, cancel)
+        # For deleted stories: only include events up to the deleted_date
         # Exclude: "Other" action type and story events without metadata
         total_before = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
+        deleted_filter = ""
+        if has_deleted_date:
+            deleted_filter = "AND (story_deleted_date IS NULL OR CAST(timestamp AS DATE) <= story_deleted_date)"
+
         con.execute(f"""
             COPY (
                 SELECT * FROM events
                 WHERE action_type != 'Other'
+                  {deleted_filter}
                   AND (
                     (story_id IS NOT NULL AND story_title IS NOT NULL)
                     OR action_type IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite')
@@ -787,7 +797,7 @@ def export_parquet_files(con, output_dir):
         """)
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
         excluded = total_before - row_count
-        log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched stories)")
+        log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched + post-delete)")
     else:
         con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
@@ -1048,6 +1058,35 @@ def print_summary(con, output_dir=None):
                 for _, row in top_stories.iterrows():
                     log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
 
+    # --- Deleted stories overview ---
+    if 'story_titles' in tables:
+        st_cols = [r[0] for r in con.execute("DESCRIBE story_titles").fetchall()]
+        if 'status' in st_cols and 'deleted_date' in st_cols:
+            deleted_stories = con.execute("""
+                SELECT story_id, story_title, author_email, deleted_date, created
+                FROM story_titles
+                WHERE status = 'deleted'
+                ORDER BY deleted_date DESC, story_id
+            """).df()
+
+            if len(deleted_stories) > 0:
+                log(f"\n  DELETED STORIES ({len(deleted_stories)} total)")
+                log("  " + "-" * 60)
+                log(f"    {'Story ID':<10s} {'Title/Author':<30s} {'Created':<12s} {'Deleted':<12s} {'Events':>8s}")
+                for _, row in deleted_stories.iterrows():
+                    sid = str(row['story_id'])
+                    label = str(row.get('story_title') or row.get('author_email') or '')[:28]
+                    created = str(row.get('created') or '')[:10]
+                    deleted = str(row.get('deleted_date') or '')[:10]
+                    # Count events for this deleted story
+                    evt_count = 0
+                    if 'story_id' in events_cols:
+                        evt_count = con.execute(f"""
+                            SELECT COUNT(*) FROM events
+                            WHERE story_id = '{sid}'
+                        """).fetchone()[0]
+                    log(f"    {sid:<10s} {label:<30s} {created:<12s} {deleted:<12s} {evt_count:>8,}")
+
     log("\n" + "=" * 64)
 
 
@@ -1263,6 +1302,20 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
                         UPDATE events SET {k} = st.{k}
                         FROM story_titles st WHERE events.story_id = st.story_id;
                     """)
+        # Map story status and deleted_date (soft-delete support)
+        if 'status' in st_cols:
+            con.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS story_status VARCHAR;
+                UPDATE events SET story_status = st.status
+                FROM story_titles st WHERE events.story_id = st.story_id;
+            """)
+        if 'deleted_date' in st_cols:
+            con.execute("""
+                ALTER TABLE events ADD COLUMN IF NOT EXISTS story_deleted_date DATE;
+                UPDATE events SET story_deleted_date = st.deleted_date
+                FROM story_titles st WHERE events.story_id = st.story_id;
+            """)
+
         has_st_text = 'story_text' in st_cols
         has_st_title = 'story_title' in st_cols
         if has_st_text and has_st_title:
