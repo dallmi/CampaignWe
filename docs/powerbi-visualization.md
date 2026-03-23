@@ -16,8 +16,9 @@ This document explains how to build CampaignWe reports in Power BI Desktop using
 6. [Page 2 — Divisions & Regions](#6-page-2--divisions--regions)
 7. [Page 3 — Stories](#7-page-3--stories)
 8. [Page 4 — Data Completeness](#8-page-4--data-completeness)
-9. [Slicers & Cross-Filtering](#9-slicers--cross-filtering)
-10. [Appendix — Full DAX Reference](#10-appendix--full-dax-reference)
+9. [Page 5 — Deleted Stories](#9-page-5--deleted-stories)
+10. [Slicers & Cross-Filtering](#10-slicers--cross-filtering)
+11. [Appendix — Full DAX Reference](#11-appendix--full-dax-reference)
 
 ---
 
@@ -52,6 +53,11 @@ Power BI Desktop can import parquet files natively (since the February 2023 rele
    - Events: All count columns → **Whole Number**
    - StoryMeta: `story_id` → **Text** (to match Events[story_id] after cast)
    - StoryMeta: `author_email`, `author_division`, `author_department`, `author_job_title`, `author_country`, `author_business_sector`, `author_area`, `author_unit` → **Text**
+   - StoryMeta: `status` → **Text** ("active" or "deleted")
+   - StoryMeta: `deleted_date` → **Date** (NULL for active stories)
+   - StoryMeta: `deleted_by` → **Text** (person_hash of user who deleted, NULL if detected via metadata comparison only)
+   - Events: `story_status` → **Text**
+   - Events: `story_deleted_date` → **Date**
 
 All dashboard visuals run against event-level data. The StoryMeta table provides story labels and author information.
 
@@ -212,6 +218,8 @@ Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 Open Invites = CALCULATE([Total Clicks], Events[action_type] = "Open Invite")
 
 Send Invites = CALCULATE([Total Clicks], Events[action_type] = "Send Invite")
+
+Deletes = CALCULATE([Total Clicks], Events[action_type] = "Delete")
 ```
 
 ### Engagement Metrics
@@ -739,7 +747,153 @@ Field Coverage % = DIVIDE([Field Non-Null Count], [Total Clicks], 0) * 100
 
 ---
 
-## 9. Slicers & Cross-Filtering
+## 9. Page 5 — Deleted Stories
+
+This page provides visibility into stories that have been removed from the platform by their creators. Historical engagement data is preserved up to the deletion date.
+
+### Layout
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  [Date Slicer]                                                  │
+├──────────┬──────────┬──────────┬──────────────────────────────────┤
+│  Total   │ Deleted  │  Active  │  Avg Story Lifespan             │
+│  Stories │ Stories  │  Stories │  (days)                          │
+├──────────┴──────────┴──────────┴──────────────────────────────────┤
+│              Deletions Over Time (bar chart by month)             │
+├─────────────────────────────────────────────────────────────────┤
+│              Deleted Stories Detail Table                         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 9.1 KPI Cards
+
+```dax
+Total Stories (All Time) =
+COUNTROWS(StoryMeta)
+
+Deleted Stories =
+COUNTROWS(FILTER(StoryMeta, StoryMeta[status] = "deleted"))
+
+Active Stories =
+COUNTROWS(FILTER(StoryMeta, StoryMeta[status] = "active"))
+
+Avg Story Lifespan (Days) =
+AVERAGEX(
+    FILTER(StoryMeta, StoryMeta[status] = "deleted"),
+    DATEDIFF(StoryMeta[created], StoryMeta[deleted_date], DAY)
+)
+```
+
+```dax
+Delete Events = CALCULATE([Total Clicks], Events[action_type] = "Delete")
+```
+
+| Card | Measure | Format |
+|------|---------|--------|
+| Total Stories | `[Total Stories (All Time)]` | Whole number |
+| Deleted Stories | `[Deleted Stories]` | Whole number |
+| Active Stories | `[Active Stories]` | Whole number |
+| Delete Events | `[Delete Events]` | Whole number |
+| Avg Lifespan | `[Avg Story Lifespan (Days)]` | 1 decimal + " days" suffix |
+
+**Formatting**: Background = `#ECEBE4`, font color = `#000000`, callout value color = `#E60000`.
+
+### 9.2 Deletions Over Time
+
+**Visual type**: Clustered bar chart (vertical)
+
+```dax
+Deletions in Period =
+COUNTROWS(
+    FILTER(
+        StoryMeta,
+        StoryMeta[status] = "deleted" &&
+        StoryMeta[deleted_date] >= MIN(DateTable[Date]) &&
+        StoryMeta[deleted_date] <= MAX(DateTable[Date])
+    )
+)
+```
+
+| Setting | Value |
+|---------|-------|
+| X-axis | DateTable[YearMonth] |
+| Y-axis | `[Deletions in Period]` |
+| Bar color | `#BD000C` (Bordeaux I) |
+| Data labels | On |
+
+### 9.3 Deleted Stories Detail Table
+
+**Visual type**: Table
+
+| Column | Source | Description |
+|--------|--------|-------------|
+| Story ID | StoryMeta[story_id] | Story identifier |
+| Title | StoryMeta[story_title] | Story title (if available) |
+| Author | StoryMeta[author_email] | Story creator |
+| Division | StoryMeta[author_division] | Author's division |
+| Created | StoryMeta[created] | Date story was created |
+| Deleted | StoryMeta[deleted_date] | Date story was removed (exact from App Insights, or approximate from metadata comparison) |
+| Deleted By | StoryMeta[deleted_by] | Person hash of user who deleted (from App Insights Delete event, blank if detected via metadata comparison) |
+| Lifespan (Days) | Calculated column (see below) | Days between creation and deletion |
+| Total Views | Measure (see below) | Lifetime views before deletion |
+| Unique Readers | Measure (see below) | Lifetime unique readers before deletion |
+
+**Calculated column** on StoryMeta:
+
+```dax
+Story Lifespan (Days) =
+IF(
+    StoryMeta[status] = "deleted" && NOT(ISBLANK(StoryMeta[created])),
+    DATEDIFF(StoryMeta[created], StoryMeta[deleted_date], DAY),
+    BLANK()
+)
+```
+
+**Context-aware measures** (filter Events via the relationship):
+
+```dax
+Story Total Views =
+CALCULATE(
+    COUNTROWS(Events),
+    Events[action_type] = "Read"
+)
+
+Story Unique Readers =
+CALCULATE(
+    DISTINCTCOUNT(Events[person_hash]),
+    Events[action_type] = "Read"
+)
+```
+
+**Formatting**:
+- Filter: StoryMeta[status] = "deleted"
+- Row background alt: `#F8F7F2`
+- Header background: `#ECEBE4`
+- Sort default: Deleted date descending
+
+### 9.4 Story Status Indicator
+
+To visually indicate deleted stories throughout the report, update the `Story Label` calculated column:
+
+```dax
+Story Label =
+IF(
+    ISBLANK(Events[story_id]),
+    BLANK(),
+    VAR _title = RELATED(StoryMeta[story_title])
+    VAR _author = RELATED(StoryMeta[author_email])
+    VAR _status = RELATED(StoryMeta[status])
+    VAR _label = COALESCE(_title, _author, "Story " & Events[story_id])
+    RETURN IF(_status = "deleted", _label & " [deleted]", _label)
+)
+```
+
+This appends `[deleted]` to story labels across all visuals, making it easy to identify removed stories.
+
+---
+
+## 10. Slicers & Cross-Filtering
 
 ### Date Range Slicer
 
@@ -774,7 +928,7 @@ To control cross-filtering: select a visual → Format → Edit interactions →
 
 ---
 
-## 10. Appendix — Full DAX Reference
+## 11. Appendix — Full DAX Reference
 
 ### All Measures in One Block
 
@@ -819,6 +973,8 @@ Cancels = CALCULATE([Total Clicks], Events[action_type] = "Cancel")
 Open Invites = CALCULATE([Total Clicks], Events[action_type] = "Open Invite")
 
 Send Invites = CALCULATE([Total Clicks], Events[action_type] = "Send Invite")
+
+Deletes = CALCULATE([Total Clicks], Events[action_type] = "Delete")
 
 
 // ═══════════════════════════════════════════
@@ -878,6 +1034,41 @@ No User % = DIVIDE([No User Count], [Total Clicks], 0) * 100
 
 
 // ═══════════════════════════════════════════
+// DELETED STORIES
+// ═══════════════════════════════════════════
+
+Total Stories (All Time) = COUNTROWS(StoryMeta)
+
+Deleted Stories =
+COUNTROWS(FILTER(StoryMeta, StoryMeta[status] = "deleted"))
+
+Active Stories =
+COUNTROWS(FILTER(StoryMeta, StoryMeta[status] = "active"))
+
+Avg Story Lifespan (Days) =
+AVERAGEX(
+    FILTER(StoryMeta, StoryMeta[status] = "deleted"),
+    DATEDIFF(StoryMeta[created], StoryMeta[deleted_date], DAY)
+)
+
+Deletions in Period =
+COUNTROWS(
+    FILTER(
+        StoryMeta,
+        StoryMeta[status] = "deleted" &&
+        StoryMeta[deleted_date] >= MIN(DateTable[Date]) &&
+        StoryMeta[deleted_date] <= MAX(DateTable[Date])
+    )
+)
+
+Story Total Views =
+CALCULATE(COUNTROWS(Events), Events[action_type] = "Read")
+
+Story Unique Readers =
+CALCULATE(DISTINCTCOUNT(Events[person_hash]), Events[action_type] = "Read")
+
+
+// ═══════════════════════════════════════════
 // TABLE-SPECIFIC
 // ═══════════════════════════════════════════
 
@@ -907,7 +1098,17 @@ IF(
     BLANK(),
     VAR _title = RELATED(StoryMeta[story_title])
     VAR _author = RELATED(StoryMeta[author_email])
-    RETURN COALESCE(_title, _author, "Story " & Events[story_id])
+    VAR _status = RELATED(StoryMeta[status])
+    VAR _label = COALESCE(_title, _author, "Story " & Events[story_id])
+    RETURN IF(_status = "deleted", _label & " [deleted]", _label)
+)
+
+// On StoryMeta table:
+Story Lifespan (Days) =
+IF(
+    StoryMeta[status] = "deleted" && NOT(ISBLANK(StoryMeta[created])),
+    DATEDIFF(StoryMeta[created], StoryMeta[deleted_date], DAY),
+    BLANK()
 )
 
 Division Display =
@@ -988,6 +1189,7 @@ Then use `story_id` on the X-axis, `action_type` as Legend, and `Count` as Value
 7. [ ] Build Page 2 (Divisions & Regions) — organisational hierarchy, region drilldown, table
 8. [ ] Build Page 3 (Stories) — top stories, funnel, heatmaps, daily trend
 9. [ ] Build Page 4 (Data Completeness) — org coverage bar, field coverage table
-10. [ ] Add slicers (Date, Action Type) to each page
+10. [ ] Build Page 5 (Deleted Stories) — KPIs, deletions over time, detail table
+11. [ ] Add slicers (Date, Action Type) to each page
 11. [ ] Configure cross-filter interactions between visuals
 12. [ ] Test drill-down on Division and Region charts

@@ -217,6 +217,7 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 | `%Send Invite%` | **Send Invite** | User sent an invite to a colleague |
 | `%Invite your colleagues%` | **Open Invite** | User opened the invite form |
 | `%Cancel%` | **Cancel** | User cancelled/closed a form |
+| `%Delete%` | **Delete** | User deleted their own story |
 | `%Read%` | **Read** | User opened/expanded a story |
 | `%like%` | **Like** | User liked content |
 | Anything else | **Other** | Unclassified click (excluded from reporting) |
@@ -233,10 +234,12 @@ The anonymized export (`events_anonymized.parquet`) applies these rules:
 |-------------|-----------|-----------|
 | Read, Like | Yes | Only if `story_id` matches a known story in `story_metadata.parquet` |
 | Open Form, Submit, Cancel | Yes | Always (story creation funnel) |
+| Delete | Yes | Always (story deletion tracking) |
 | Send Invite, Open Invite | Yes | Always (invite funnel) |
 | Other | No | Always excluded |
+| Deleted story events | Partial | Only events **up to** the `deleted_date` are included |
 
-This ensures clean funnel analysis while filtering out noise. The raw database retains all events for diagnostics.
+This ensures clean funnel analysis while filtering out noise. Events for deleted stories are preserved up to the deletion date, allowing historical reporting. The raw database retains all events for diagnostics.
 
 #### Views per Visitor
 
@@ -254,7 +257,7 @@ This is the average number of story-open clicks per unique visitor within a give
 |------|----------|-------|
 | `events_raw.parquet` | All events with raw identifiers and org columns (internal use only) | One row per event |
 | `events_anonymized.parquet` | Primary export: filtered to known stories + funnel actions, identifiers hashed/dropped, `visitor_*` org fields | One row per event |
-| `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info (email, division, department, job title, country, business sector, area, unit), keys | One row per story |
+| `story_metadata.parquet` | Story lookup with `story_text`, `story_title` (when available), author info (email, division, department, job title, country, business sector, area, unit), keys, `status` (active/deleted), `deleted_date` | One row per story (including deleted) |
 
 ---
 
@@ -268,6 +271,58 @@ The DuckDB database at `data/campaignwe.db` contains:
 | `events` | Final enriched table with all calculated columns |
 | `story_titles` | Story metadata (loaded each run from `story_metadata.parquet`, dropped after join) |
 | `processed_files` | File processing manifest for delta tracking |
+
+---
+
+## Story Soft-Delete
+
+Story creators can delete their stories from the page at any time. The pipeline uses two complementary signals to detect deletions and preserves story metadata for historical reporting.
+
+### Deletion Detection (Two Sources)
+
+| Source | Signal | Precision | Details |
+|--------|--------|-----------|---------|
+| **App Insights** (primary) | `Delete` event in `CP_Link_label` (e.g. `"15Delete full story"`) | Exact timestamp | Also captures `person_hash` of the user who deleted |
+| **Metadata comparison** (fallback) | Story disappears from the SharePoint CSV between runs | Day-level approximation | Detects deletions even if the App Insights event was not logged |
+
+### How It Works
+
+1. **`fetch_story_metadata.py`** runs first:
+   - Loads the existing `story_metadata.parquet`
+   - Stories missing from the new CSV are marked `status = "deleted"` with `deleted_date = today` (approximate)
+   - Previously deleted stories are carried forward with their existing dates unchanged
+   - If a deleted story reappears in the CSV, it is restored to `"active"` status
+
+2. **`process_campaignwe.py`** runs second:
+   - Processes click events including any `Delete` action type events
+   - After processing, scans for Delete events and **corrects** `deleted_date` in `story_metadata.parquet` to the exact App Insights timestamp
+   - Also records `deleted_by` (person_hash of the user who deleted)
+   - Updates in-memory events table with the corrected dates before export
+
+This two-step approach ensures the metadata file always has the most precise deletion date available, regardless of run order or timing.
+
+### Effect on Events
+
+- `process_campaignwe.py` maps `story_status` and `story_deleted_date` from the metadata onto each event
+- The anonymized parquet export filters out events for deleted stories that occurred **after** the `deleted_date`
+- Events **up to** the `deleted_date` are preserved, allowing historical analysis
+
+### Columns Added
+
+| Table | Column | Type | Description |
+|-------|--------|------|-------------|
+| story_metadata | `status` | VARCHAR | `"active"` or `"deleted"` |
+| story_metadata | `deleted_date` | DATE | Exact deletion date (from App Insights) or approximate (from metadata comparison). NULL for active stories |
+| story_metadata | `deleted_by` | VARCHAR | `person_hash` of the user who deleted (from App Insights Delete event). NULL if detected via metadata comparison only |
+| events | `story_status` | VARCHAR | Mapped from story_metadata |
+| events | `story_deleted_date` | DATE | Mapped from story_metadata |
+
+### Important Notes
+
+- The App Insights Delete event provides the exact deletion date; the metadata comparison is a fallback with day-level precision
+- The `story_metadata.parquet` file serves as the historical record. **Do not delete it** unless you intend to lose the deletion history
+- A warning is logged if no existing parquet is found (first run or after manual deletion)
+- The exact `CP_Link_label` text for delete actions is not yet confirmed — the pattern `%Delete%` will match any label containing "Delete"
 
 ---
 

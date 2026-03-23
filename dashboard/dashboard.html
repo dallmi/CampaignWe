@@ -249,6 +249,7 @@
                 <button class="nav-tab" onclick="switchTab('tabDivisions')">Divisions & Regions</button>
                 <button class="nav-tab" onclick="switchTab('tabStories')">Stories</button>
                 <button class="nav-tab" onclick="switchTab('tabQuality')">Data Completeness</button>
+                <button class="nav-tab" onclick="switchTab('tabDeleted')">Deleted Stories</button>
             </div>
 
             <!-- TAB 1: Overview -->
@@ -363,6 +364,21 @@
                     <div class="chart-title">Field Coverage
                     </div>
                     <div class="table-container" id="fieldCoverageTable"></div>
+                </div>
+            </div>
+
+            <!-- TAB 5: Deleted Stories -->
+            <div class="nav-content" id="tabDeleted">
+                <div class="kpi-grid" id="deletedKpiGrid"></div>
+                <div class="charts-grid">
+                    <div class="chart-card full-width">
+                        <div class="chart-title">Deletions Over Time <span class="chart-subtitle">By month</span></div>
+                        <div class="chart-container"><canvas id="chartDeletionsOverTime"></canvas></div>
+                    </div>
+                </div>
+                <div class="chart-card full-width" style="margin-top: 1rem;">
+                    <div class="chart-title">Deleted Stories — Detail</div>
+                    <div class="table-container" id="deletedStoriesTable"></div>
                 </div>
             </div>
 
@@ -866,7 +882,15 @@
                     window._storyMeta = {};
                     metaRows.forEach(r => {
                         const email = r.author_email || r.email || null;
-                        window._storyMeta[String(r.story_id)] = { author_email: email, story_title: r.story_title || null };
+                        window._storyMeta[String(r.story_id)] = {
+                            author_email: email,
+                            story_title: r.story_title || null,
+                            status: r.status || 'active',
+                            deleted_date: r.deleted_date || null,
+                            deleted_by: r.deleted_by || null,
+                            created: r.created || null,
+                            author_division: r.author_division || null,
+                        };
                     });
                     console.log('Story metadata loaded:', metaRows.length, 'stories. Columns:', metaRows.length > 0 ? Object.keys(metaRows[0]) : '(empty)');
                     console.log('Sample entry:', metaRows.length > 0 ? window._storyMeta[String(metaRows[0].story_id)] : '(none)');
@@ -1208,7 +1232,8 @@
                     renderDivDaily, renderDivDepthTable,
                     renderStoryReads, renderStoryReaders, renderKeyEngagement, renderFunnel, renderCreationFunnel, renderInviteFunnel, renderStoryEngagement,
                     renderDivStoryHeatmap, renderRegStoryHeatmap, renderStoryDaily,
-                    renderGpnCoverage, renderFieldCoverage
+                    renderGpnCoverage, renderFieldCoverage,
+                    renderDeletedStories
                 ];
                 const results = await Promise.allSettled(tasks.map(fn => fn()));
                 const fails = results.filter(r => r.status === 'rejected');
@@ -2009,6 +2034,126 @@
             });
             tableData.fieldCoverage = { headers, rows, rightAlign: [false, true, true, true] };
             document.getElementById('fieldCoverageTable').innerHTML = renderHTMLTable(headers, rows, [false, true, true, true]);
+        }
+
+        // =====================================================================
+        // TAB 5: DELETED STORIES
+        // =====================================================================
+        async function renderDeletedStories() {
+            if (!window._storyMeta) {
+                document.getElementById('deletedKpiGrid').innerHTML = '<p style="padding:1rem;color:var(--medium-gray)">Story metadata not available.</p>';
+                return;
+            }
+
+            const allStories = Object.entries(window._storyMeta);
+            const deletedStories = allStories.filter(([, m]) => m.status === 'deleted');
+            const activeStories = allStories.filter(([, m]) => m.status !== 'deleted');
+
+            // Calculate avg lifespan for deleted stories with both dates
+            let avgLifespan = null;
+            const lifespans = deletedStories
+                .filter(([, m]) => m.created && m.deleted_date)
+                .map(([, m]) => {
+                    const c = new Date(m.created);
+                    const d = new Date(m.deleted_date);
+                    return Math.round((d - c) / (1000 * 60 * 60 * 24));
+                })
+                .filter(d => d >= 0);
+            if (lifespans.length > 0) {
+                avgLifespan = (lifespans.reduce((a, b) => a + b, 0) / lifespans.length).toFixed(1);
+            }
+
+            // Count delete events from App Insights
+            let deleteEvents = 0;
+            try {
+                const evtCols = (await q("DESCRIBE events")).map(d => d.column_name);
+                if (evtCols.includes('action_type')) {
+                    const res = await q("SELECT COUNT(*) as cnt FROM events WHERE action_type = 'Delete'");
+                    deleteEvents = Number(res[0]?.cnt || 0);
+                }
+            } catch(e) { /* ignore */ }
+
+            // KPI cards
+            document.getElementById('deletedKpiGrid').innerHTML = [
+                kpiCard('TOTAL STORIES', fmtNum(allStories.length), 'info'),
+                kpiCard('ACTIVE', fmtNum(activeStories.length), 'success'),
+                kpiCard('DELETED', fmtNum(deletedStories.length), 'danger'),
+                kpiCard('DELETE EVENTS', fmtNum(deleteEvents), 'warning'),
+                kpiCard('AVG LIFESPAN', avgLifespan ? avgLifespan + ' days' : '\u2014', 'info'),
+            ].join('');
+
+            // Deletions over time chart (by month)
+            const monthCounts = {};
+            deletedStories.forEach(([, m]) => {
+                if (!m.deleted_date) return;
+                const d = new Date(m.deleted_date);
+                const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+                monthCounts[key] = (monthCounts[key] || 0) + 1;
+            });
+            const months = Object.keys(monthCounts).sort();
+            const chartEl = document.getElementById('chartDeletionsOverTime');
+            if (months.length > 0) {
+                new Chart(chartEl, {
+                    type: 'bar',
+                    data: {
+                        labels: months,
+                        datasets: [{ label: 'Deletions', data: months.map(m => monthCounts[m]), backgroundColor: '#BD000C' }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                            x: { grid: { display: false } }
+                        }
+                    }
+                });
+            } else {
+                chartEl.parentElement.innerHTML = '<p style="padding:2rem;text-align:center;color:var(--medium-gray)">No deletions recorded yet.</p>';
+            }
+
+            // Detail table
+            if (deletedStories.length === 0) {
+                document.getElementById('deletedStoriesTable').innerHTML = '<p style="padding:1rem;color:var(--medium-gray)">No deleted stories.</p>';
+                return;
+            }
+
+            // Get event counts per deleted story
+            const deletedIds = deletedStories.map(([id]) => id);
+            let eventCounts = {};
+            let viewCounts = {};
+            try {
+                const idList = deletedIds.map(id => `'${id}'`).join(',');
+                const res = await q(`
+                    SELECT story_id,
+                           COUNT(*) as total,
+                           CAST(SUM(CASE WHEN action_type='Read' THEN 1 ELSE 0 END) AS INTEGER) as views,
+                           COUNT(DISTINCT person_hash) as readers
+                    FROM events WHERE story_id IN (${idList}) GROUP BY story_id
+                `);
+                res.forEach(r => {
+                    eventCounts[String(r.story_id)] = { total: Number(r.total), views: Number(r.views), readers: Number(r.readers) };
+                });
+            } catch(e) { /* ignore */ }
+
+            const headers = ['Story', 'Division', 'Created', 'Deleted', 'Lifespan', 'Source', 'Views', 'Readers'];
+            const rightAlign = [false, false, false, false, true, false, true, true];
+            const rows = deletedStories.map(([id, m]) => {
+                const label = m.story_title || m.author_email || 'Story ' + id;
+                const division = m.author_division || '';
+                const created = m.created ? new Date(m.created).toLocaleDateString('en-GB') : '';
+                const deleted = m.deleted_date ? new Date(m.deleted_date).toLocaleDateString('en-GB') : '';
+                let lifespan = '';
+                if (m.created && m.deleted_date) {
+                    const days = Math.round((new Date(m.deleted_date) - new Date(m.created)) / (1000 * 60 * 60 * 24));
+                    lifespan = days >= 0 ? days : '';
+                }
+                const source = m.deleted_by ? 'App Insights' : 'Metadata';
+                const ec = eventCounts[id] || {};
+                return [label, division, created, deleted, lifespan, source, ec.views || 0, ec.readers || 0];
+            });
+            const container = document.getElementById('deletedStoriesTable');
+            container.innerHTML = renderSortableTable(headers, rows, rightAlign, 'deletedStories', 3, 'desc');
         }
 
         // =====================================================================

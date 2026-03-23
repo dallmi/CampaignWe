@@ -416,6 +416,7 @@ def main():
     # Add status column for active stories
     result["status"] = "active"
     result["deleted_date"] = pd.NaT
+    result["deleted_by"] = None
 
     if preview or result.empty:
         print("\n--- Story Titles ---")
@@ -441,14 +442,16 @@ def main():
             existing["status"] = "active"
         if "deleted_date" not in existing.columns:
             existing["deleted_date"] = pd.NaT
+        if "deleted_by" not in existing.columns:
+            existing["deleted_by"] = None
 
         active_ids = set(result["story_id"].tolist())
         existing_ids = set(existing["story_id"].tolist())
 
         # Stories that were in existing but are NOT in current fetch → newly deleted
         newly_deleted_ids = existing_ids - active_ids
-        # Stories that were already marked deleted previously
-        previously_deleted = existing[existing["status"] == "deleted"]
+        # Stories that were already marked deleted previously (preserve their corrected dates)
+        previously_deleted = existing[existing["status"] == "deleted"].copy()
 
         if newly_deleted_ids:
             today = datetime.date.today()
@@ -457,7 +460,7 @@ def main():
                 (existing["status"] != "deleted")  # don't re-mark already deleted
             ].copy()
             newly_deleted["status"] = "deleted"
-            newly_deleted["deleted_date"] = today
+            newly_deleted["deleted_date"] = today  # approximate — corrected later by process_campaignwe.py
             print(f"  Soft-deleted {len(newly_deleted)} stories (no longer in SharePoint): "
                   f"IDs {sorted(newly_deleted_ids)}")
 

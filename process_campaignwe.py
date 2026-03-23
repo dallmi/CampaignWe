@@ -37,6 +37,7 @@ Action Type Classification (from CP_Link_label, case-insensitive):
     - Open Form   — "%Share your story%"   (user opened the story submission form)
     - Submit      — "%Submit%"             (user submitted a story)
     - Cancel      — "%Cancel%"             (user cancelled/closed the submission form)
+    - Delete      — "%Delete%"             (user deleted their own story)
     - Read        — "%Read%"               (user opened/expanded a story)
     - Like        — "%like%"               (user liked content)
     - Other       — anything else          (excluded from dashboard)
@@ -440,6 +441,97 @@ def load_story_titles(con, story_titles_path):
     return True
 
 
+def correct_deleted_dates_from_events(con, story_metadata_path):
+    """
+    Correct deleted_date in story_metadata.parquet using Delete events from App Insights.
+
+    When a user deletes their story, App Insights logs a Delete event with an exact
+    timestamp. This is more precise than the metadata comparison (which only detects
+    the deletion on the next fetch_story_metadata.py run). This function:
+    1. Finds Delete events in the events table
+    2. Extracts the earliest delete timestamp per story_id
+    3. Updates story_metadata.parquet with the exact date and the person who deleted
+    4. Updates the in-memory events table to reflect the corrected deleted_date
+    """
+    evt_cols = [r[0] for r in con.execute("DESCRIBE events").fetchall()]
+    if 'action_type' not in evt_cols:
+        return
+
+    # Find Delete events with their timestamps and person_hash
+    delete_events = con.execute("""
+        SELECT
+            story_id,
+            MIN(CAST(timestamp AS DATE)) as delete_date,
+            FIRST(person_hash) as deleted_by
+        FROM events
+        WHERE action_type = 'Delete'
+          AND story_id IS NOT NULL
+        GROUP BY story_id
+    """).df()
+
+    if delete_events.empty:
+        return
+
+    log(f"\n  Found {len(delete_events)} Delete event(s) in App Insights:")
+    for _, row in delete_events.iterrows():
+        log(f"    story_id={row['story_id']} deleted on {row['delete_date']} by {str(row['deleted_by'])[:16]}…")
+
+    # Read and update story_metadata.parquet
+    if not story_metadata_path.exists():
+        return
+
+    meta = pd.read_parquet(story_metadata_path)
+    meta["story_id"] = meta["story_id"].astype(str).str.strip()
+
+    if "status" not in meta.columns:
+        meta["status"] = "active"
+    if "deleted_date" not in meta.columns:
+        meta["deleted_date"] = pd.NaT
+    if "deleted_by" not in meta.columns:
+        meta["deleted_by"] = None
+
+    updated = 0
+    for _, evt in delete_events.iterrows():
+        sid = str(evt["story_id"])
+        mask = meta["story_id"] == sid
+        if not mask.any():
+            continue
+
+        current_status = meta.loc[mask, "status"].iloc[0]
+        current_date = meta.loc[mask, "deleted_date"].iloc[0]
+        new_date = evt["delete_date"]
+
+        # Update if: not yet marked as deleted, or our date is more precise (earlier)
+        if current_status != "deleted" or pd.isna(current_date) or new_date < pd.Timestamp(current_date).date():
+            meta.loc[mask, "status"] = "deleted"
+            meta.loc[mask, "deleted_date"] = new_date
+            meta.loc[mask, "deleted_by"] = evt["deleted_by"]
+            updated += 1
+            if current_status == "deleted" and not pd.isna(current_date):
+                log(f"    Corrected story {sid}: {current_date} → {new_date} (from App Insights)")
+            else:
+                log(f"    Marked story {sid} as deleted: {new_date} (from App Insights)")
+
+    if updated > 0:
+        meta["deleted_date"] = pd.to_datetime(meta["deleted_date"], errors="coerce").dt.date
+        meta.to_parquet(story_metadata_path, index=False)
+        log(f"  Updated {updated} story deletion(s) in {story_metadata_path.name}")
+
+        # Refresh the in-memory events table with corrected dates
+        for _, evt in delete_events.iterrows():
+            sid = str(evt["story_id"])
+            if 'story_deleted_date' in evt_cols:
+                con.execute(f"""
+                    UPDATE events SET story_deleted_date = '{evt['delete_date']}'
+                    WHERE story_id = '{sid}'
+                """)
+            if 'story_status' in evt_cols:
+                con.execute(f"""
+                    UPDATE events SET story_status = 'deleted'
+                    WHERE story_id = '{sid}'
+                """)
+
+
 def load_hr_history(con, hr_parquet_path):
     """
     Load hr_history.parquet into DuckDB for GPN-based joining.
@@ -601,6 +693,7 @@ def add_calculated_columns(con, has_hr_history=False):
                 WHEN r."{link_label_col}" ILIKE '%Send Invite%' THEN 'Send Invite'
                 WHEN r."{link_label_col}" ILIKE '%Invite your colleagues%' THEN 'Open Invite'
                 WHEN r."{link_label_col}" ILIKE '%Cancel%' THEN 'Cancel'
+                WHEN r."{link_label_col}" ILIKE '%Delete%' THEN 'Delete'
                 WHEN r."{link_label_col}" ILIKE '%Read%' THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%' THEN 'Like'
                 ELSE 'Other'
@@ -790,7 +883,7 @@ def export_parquet_files(con, output_dir):
                   {deleted_filter}
                   AND (
                     (story_id IS NOT NULL AND story_title IS NOT NULL)
-                    OR action_type IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite')
+                    OR action_type IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite', 'Delete')
                   )
             )
             TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)
@@ -1059,25 +1152,26 @@ def print_summary(con, output_dir=None):
                     log(f"    {str(row['story_id']):<12s} {int(row['reads']):>8,} {int(row['unique_readers']):>8,} {int(row['likes']):>8,}")
 
     # --- Deleted stories overview ---
-    if 'story_titles' in tables:
-        st_cols = [r[0] for r in con.execute("DESCRIBE story_titles").fetchall()]
-        if 'status' in st_cols and 'deleted_date' in st_cols:
-            deleted_stories = con.execute("""
-                SELECT story_id, story_title, author_email, deleted_date, created
-                FROM story_titles
-                WHERE status = 'deleted'
-                ORDER BY deleted_date DESC, story_id
-            """).df()
+    # Read from parquet directly (story_titles table may already be dropped or stale)
+    story_metadata_path = Path(output_dir) / 'story_metadata.parquet' if output_dir else None
+    if story_metadata_path and story_metadata_path.exists():
+        meta_df = pd.read_parquet(story_metadata_path)
+        if 'status' in meta_df.columns and 'deleted_date' in meta_df.columns:
+            deleted_stories = meta_df[meta_df['status'] == 'deleted'].sort_values(
+                'deleted_date', ascending=False)
 
             if len(deleted_stories) > 0:
+                has_deleted_by = 'deleted_by' in deleted_stories.columns
                 log(f"\n  DELETED STORIES ({len(deleted_stories)} total)")
                 log("  " + "-" * 60)
-                log(f"    {'Story ID':<10s} {'Title/Author':<30s} {'Created':<12s} {'Deleted':<12s} {'Events':>8s}")
+                header = f"    {'Story ID':<10s} {'Title/Author':<28s} {'Created':<12s} {'Deleted':<12s} {'Source':<10s} {'Events':>8s}"
+                log(header)
                 for _, row in deleted_stories.iterrows():
                     sid = str(row['story_id'])
-                    label = str(row.get('story_title') or row.get('author_email') or '')[:28]
+                    label = str(row.get('story_title') or row.get('author_email') or '')[:26]
                     created = str(row.get('created') or '')[:10]
                     deleted = str(row.get('deleted_date') or '')[:10]
+                    source = "AppInsight" if (has_deleted_by and pd.notna(row.get('deleted_by'))) else "Metadata"
                     # Count events for this deleted story
                     evt_count = 0
                     if 'story_id' in events_cols:
@@ -1085,7 +1179,7 @@ def print_summary(con, output_dir=None):
                             SELECT COUNT(*) FROM events
                             WHERE story_id = '{sid}'
                         """).fetchone()[0]
-                    log(f"    {sid:<10s} {label:<30s} {created:<12s} {deleted:<12s} {evt_count:>8,}")
+                    log(f"    {sid:<10s} {label:<28s} {created:<12s} {deleted:<12s} {source:<10s} {evt_count:>8,}")
 
     log("\n" + "=" * 64)
 
@@ -1347,6 +1441,10 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
         """).fetchall()
         for sid, title, status in diag:
             log(f"    events join: id={sid!r} title={title!r} [{status}]")
+
+    # Correct deleted_date in story_metadata using Delete events from App Insights
+    if has_story_titles:
+        correct_deleted_dates_from_events(con, story_titles_path)
 
     # Export Parquet files
     export_parquet_files(con, output_dir)
