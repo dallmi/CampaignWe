@@ -381,6 +381,7 @@ def build_events_table(con, has_hr_history=False):
                 WHEN r."{link_label_col}" ILIKE '%Send Invite%'      THEN 'Send Invite'
                 WHEN r."{link_label_col}" ILIKE '%Invite your colleagues%' THEN 'Open Invite'
                 WHEN r."{link_label_col}" ILIKE '%Cancel%'           THEN 'Cancel'
+                WHEN r."{link_label_col}" ILIKE '%Delete%'           THEN 'Delete'
                 WHEN r."{link_label_col}" ILIKE '%Read%'             THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%'             THEN 'Like'
                 ELSE 'Other'
@@ -789,7 +790,7 @@ def process_campaignwe_hll(run_compare=False):
             DELETE FROM events
             WHERE action_type = 'Other'
                OR (
-                   action_type NOT IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite')
+                   action_type NOT IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite', 'Delete')
                    AND (story_id IS NULL OR story_id NOT IN (SELECT story_id FROM story_titles))
                )
         """)
