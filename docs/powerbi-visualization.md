@@ -161,7 +161,7 @@ These columns already exist in the parquet file from the Python pipeline, so you
 | `event_hour` | Hour in CET (0–23) | Yes |
 | `event_weekday` | Day name (Monday–Sunday) | Yes |
 | `event_weekday_num` | ISO weekday (1=Mon, 7=Sun) | Yes |
-| `action_type` | Read, Like, Open Form, Submit, Cancel, Other | Yes |
+| `action_type` | Read, Like, Open Form, Submit, Cancel, Delete, Send Invite, Open Invite | Yes |
 | `story_id` | Extracted story number | Yes |
 | `session_key` | Unique session identifier | Yes |
 | `person_hash` | Anonymised user identifier (hash) | Yes |

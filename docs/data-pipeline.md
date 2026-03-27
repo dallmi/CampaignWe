@@ -217,7 +217,7 @@ The `action_type` column is derived from the `CP_Link_label` text using pattern 
 | `%Send Invite%` | **Send Invite** | User sent an invite to a colleague |
 | `%Invite your colleagues%` | **Open Invite** | User opened the invite form |
 | `%Cancel%` | **Cancel** | User cancelled/closed a form |
-| `%Delete%` | **Delete** | User deleted their own story |
+| `^\d+Yes$` (regex) | **Delete** | User confirmed story deletion (e.g. `56Yes`) |
 | `%Read%` | **Read** | User opened/expanded a story |
 | `%like%` | **Like** | User liked content |
 | Anything else | **Other** | Unclassified click (excluded from reporting) |
@@ -282,7 +282,7 @@ Story creators can delete their stories from the page at any time. The pipeline 
 
 | Source | Signal | Precision | Details |
 |--------|--------|-----------|---------|
-| **App Insights** (primary) | `Delete` event in `CP_Link_label` (e.g. `"15Delete full story"`) | Exact timestamp | Also captures `person_hash` of the user who deleted |
+| **App Insights** (primary) | Delete confirmation in `CP_Link_label` matching `^\d+Yes$` (e.g. `"56Yes"`) | Exact timestamp | Also captures `person_hash` of the user who deleted |
 | **Metadata comparison** (fallback) | Story disappears from the SharePoint CSV between runs | Day-level approximation | Detects deletions even if the App Insights event was not logged |
 
 ### How It Works
@@ -322,7 +322,7 @@ This two-step approach ensures the metadata file always has the most precise del
 - The App Insights Delete event provides the exact deletion date; the metadata comparison is a fallback with day-level precision
 - The `story_metadata.parquet` file serves as the historical record. **Do not delete it** unless you intend to lose the deletion history
 - A warning is logged if no existing parquet is found (first run or after manual deletion)
-- The exact `CP_Link_label` text for delete actions is not yet confirmed — the pattern `%Delete%` will match any label containing "Delete"
+- The delete flow in App Insights produces multiple labels (`56Edit or delete your story` → `56Delete` → `56No`/`56Yes`). Only the confirmation `56Yes` (matched by `^\d+Yes$`) counts as an actual deletion
 
 ---
 
