@@ -381,7 +381,7 @@ def build_events_table(con, has_hr_history=False):
                 WHEN r."{link_label_col}" ILIKE '%Send Invite%'      THEN 'Send Invite'
                 WHEN r."{link_label_col}" ILIKE '%Invite your colleagues%' THEN 'Open Invite'
                 WHEN r."{link_label_col}" ILIKE '%Cancel%'           THEN 'Cancel'
-                WHEN regexp_matches(r."{link_label_col}", '^\d+Yes$') THEN 'Delete'
+                WHEN regexp_matches(r."{link_label_col}", '^\\d+Yes$') THEN 'Delete'
                 WHEN r."{link_label_col}" ILIKE '%Read%'             THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%'             THEN 'Like'
                 ELSE 'Other'

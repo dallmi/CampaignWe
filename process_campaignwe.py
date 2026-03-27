@@ -37,7 +37,7 @@ Action Type Classification (from CP_Link_label, case-insensitive):
     - Open Form   — "%Share your story%"   (user opened the story submission form)
     - Submit      — "%Submit%"             (user submitted a story)
     - Cancel      — "%Cancel%"             (user cancelled/closed the submission form)
-    - Delete      — "^\d+Yes$"             (user confirmed story deletion, e.g. "56Yes")
+    - Delete      — "^\\d+Yes$"            (user confirmed story deletion, e.g. "56Yes")
     - Read        — "%Read%"               (user opened/expanded a story)
     - Like        — "%like%"               (user liked content)
     - Other       — anything else          (excluded from dashboard)
@@ -693,7 +693,7 @@ def add_calculated_columns(con, has_hr_history=False):
                 WHEN r."{link_label_col}" ILIKE '%Send Invite%' THEN 'Send Invite'
                 WHEN r."{link_label_col}" ILIKE '%Invite your colleagues%' THEN 'Open Invite'
                 WHEN r."{link_label_col}" ILIKE '%Cancel%' THEN 'Cancel'
-                WHEN regexp_matches(r."{link_label_col}", '^\d+Yes$') THEN 'Delete'
+                WHEN regexp_matches(r."{link_label_col}", '^\\d+Yes$') THEN 'Delete'
                 WHEN r."{link_label_col}" ILIKE '%Read%' THEN 'Read'
                 WHEN r."{link_label_col}" ILIKE '%like%' THEN 'Like'
                 ELSE 'Other'
