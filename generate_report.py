@@ -39,6 +39,7 @@ LAKE_50 = "0C7EC6"
 WHITE = "FFFFFF"
 BLACK = "000000"
 GRAY_I = "CCCABC"
+GRAY_III = "8E8D83"
 GRAY_IV = "7A7870"
 GRAY_VI = "404040"
 PASTEL_I = "ECEBE4"
@@ -155,6 +156,18 @@ def write_total_row(ws, row, data, col_start=1, fmt_map=None):
             cell.number_format = NUM_FMT_INT
 
 
+def write_formula(ws, row, col, formula, fmt=None, fill=None, bold=False):
+    """Write an Excel formula into a cell with styling."""
+    cell = ws.cell(row=row, column=col, value=formula)
+    cell.border = THIN_BORDER
+    if fmt:
+        cell.number_format = fmt
+    if fill:
+        cell.fill = fill
+    if bold:
+        cell.font = TOTAL_FONT
+
+
 def auto_fit_columns(ws, min_width=10, max_width=40):
     """Auto-fit column widths based on content."""
     for col_cells in ws.columns:
@@ -249,60 +262,80 @@ def build_executive_summary(wb, con, cols):
         SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'deleted'
     """).fetchone()[0]
 
-    # Org coverage
-    has_visitor_div = "visitor_division" in cols
-    if has_visitor_div:
-        org_covered = con.execute("""
-            SELECT COUNT(*) FROM events WHERE visitor_division IS NOT NULL
-        """).fetchone()[0]
-        org_pct = org_covered / total if total > 0 else 0
-    else:
-        org_pct = None
+    # Aggregate click categories
+    engagement_clicks = reads + likes
+    invite_clicks = invites_sent + invites_opened
+    submission_clicks = open_forms + submits + cancels + deletes
 
-    # --- Layout ---
+    # --- Layout --- (track row numbers for formula references)
     r = 1
-    write_section_header(ws, r, "CAMPAIGN OVERVIEW", 2)
-    r += 1
+    write_section_header(ws, r, "CAMPAIGN OVERVIEW", 2); r += 1
     write_kpi_row(ws, r, "Report Period", f"{first_date} to {last_date}"); r += 1
-    write_kpi_row(ws, r, "Duration (days)", duration, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Duration (days)", duration, fmt=NUM_FMT_INT); row_dur = r; r += 1
     r += 1
 
     write_section_header(ws, r, "REACH", 2); r += 1
-    write_kpi_row(ws, r, "Total Clicks", total, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Unique Visitors", uv, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Total Clicks", total, fmt=NUM_FMT_INT); row_clicks = r; r += 1
+    # Click breakdown with formulas for % share
+    write_kpi_row(ws, r, "  Engagement (Read + Like)", engagement_clicks, fmt=NUM_FMT_INT); row_eng = r; r += 1
+    write_kpi_row(ws, r, "  Invite (Open + Send)", invite_clicks, fmt=NUM_FMT_INT); row_inv = r; r += 1
+    write_kpi_row(ws, r, "  Submission (Form + Submit + Cancel + Delete)", submission_clicks, fmt=NUM_FMT_INT); row_sub = r; r += 1
+    # Add % column (column C) for the breakdown
+    ws.cell(row=row_clicks, column=3).value = "Share"
+    ws.cell(row=row_clicks, column=3).font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=row_clicks, column=3).border = THIN_BORDER
+    for br in [row_eng, row_inv, row_sub]:
+        write_formula(ws, br, 3, f"=IF(B${row_clicks}=0,0,B{br}/B${row_clicks})", fmt=NUM_FMT_PCT)
+    write_kpi_row(ws, r, "Unique Visitors", uv, fmt=NUM_FMT_INT); row_uv = r; r += 1
     write_kpi_row(ws, r, "Unique Sessions", sessions, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Avg. Clicks / Visitor",
-                  round(total / uv, 1) if uv > 0 else 0); r += 1
-    write_kpi_row(ws, r, "Avg. Daily Visitors",
-                  round(uv / duration, 1) if duration > 0 else 0); r += 1
-    if org_pct is not None:
-        write_kpi_row(ws, r, "Org Data Coverage", org_pct, fmt=NUM_FMT_PCT); r += 1
+    # Formula: Total Clicks / Unique Visitors
+    ws.cell(row=r, column=1, value="Avg. Clicks / Visitor").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_uv}=0,0,B{row_clicks}/B{row_uv})", fmt=NUM_FMT_RATIO); r += 1
+    # Formula: Unique Visitors / Duration
+    ws.cell(row=r, column=1, value="Avg. Daily Visitors").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_dur}=0,0,B{row_uv}/B{row_dur})", fmt=NUM_FMT_RATIO); r += 1
     r += 1
 
     write_section_header(ws, r, "ENGAGEMENT", 2); r += 1
-    write_kpi_row(ws, r, "Story Reads", reads, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Story Likes", likes, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Like Rate (Likes / Reads)",
-                  likes / reads if reads > 0 else 0, fmt=NUM_FMT_PCT); r += 1
+    write_kpi_row(ws, r, "Story Reads", reads, fmt=NUM_FMT_INT); row_reads = r; r += 1
+    write_kpi_row(ws, r, "Story Likes", likes, fmt=NUM_FMT_INT); row_likes = r; r += 1
+    # Formula: Likes / Reads
+    ws.cell(row=r, column=1, value="Like Rate (Likes / Reads)").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_reads}=0,0,B{row_likes}/B{row_reads})", fmt=NUM_FMT_PCT); r += 1
     write_kpi_row(ws, r, "Invites Sent", invites_sent, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Invites Opened", invites_opened, fmt=NUM_FMT_INT); r += 1
     r += 1
 
     write_section_header(ws, r, "CONTENT", 2); r += 1
     write_kpi_row(ws, r, "Total Stories (all time)", stories, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Active Stories", active_stories, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Active Stories", active_stories, fmt=NUM_FMT_INT); row_active = r; r += 1
     write_kpi_row(ws, r, "Deleted Stories", deleted_stories, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Avg. Reads / Active Story",
-                  round(reads / active_stories, 1) if active_stories > 0 else 0); r += 1
-    write_kpi_row(ws, r, "Avg. Likes / Active Story",
-                  round(likes / active_stories, 1) if active_stories > 0 else 0); r += 1
+    # Formula: Reads / Active Stories
+    ws.cell(row=r, column=1, value="Avg. Reads / Active Story").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_active}=0,0,B{row_reads}/B{row_active})", fmt=NUM_FMT_RATIO); r += 1
+    # Formula: Likes / Active Stories
+    ws.cell(row=r, column=1, value="Avg. Likes / Active Story").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_active}=0,0,B{row_likes}/B{row_active})", fmt=NUM_FMT_RATIO); r += 1
     r += 1
 
     write_section_header(ws, r, "SUBMISSION FUNNEL", 2); r += 1
-    write_kpi_row(ws, r, "Opened Form", open_forms, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Submitted", submits, fmt=NUM_FMT_INT); r += 1
-    submit_rate = submits / open_forms if open_forms > 0 else 0
-    write_kpi_row(ws, r, "Submission Rate (Submit / Open Form)", submit_rate, fmt=NUM_FMT_PCT); r += 1
+    write_kpi_row(ws, r, "Opened Form", open_forms, fmt=NUM_FMT_INT); row_openform = r; r += 1
+    write_kpi_row(ws, r, "Submitted", submits, fmt=NUM_FMT_INT); row_submit = r; r += 1
+    # Formula: Submits / Open Forms
+    ws.cell(row=r, column=1, value="Submission Rate (Submit / Open Form)").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=IF(B{row_openform}=0,0,B{row_submit}/B{row_openform})", fmt=NUM_FMT_PCT); r += 1
     write_kpi_row(ws, r, "Cancelled", cancels, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Delete Confirmations (Clicks)", deletes, fmt=NUM_FMT_INT); r += 1
 
@@ -360,29 +393,35 @@ def build_weekly_trend(wb, con):
             w.cancels,
             w.invites_sent,
             w.invites_opened,
-            w.deletes,
-            CASE WHEN w.reads > 0 THEN ROUND(w.likes * 1.0 / w.reads, 3) ELSE 0 END as like_rate,
-            CASE WHEN w.active_days > 0 THEN ROUND(w.uv * 1.0 / w.active_days, 1) ELSE 0 END as avg_daily_uv
+            w.deletes
         FROM weekly w
         LEFT JOIN new_per_week n ON w.yw = n.yw
         ORDER BY w.yw
     """).fetchall()
 
+    # Col: A=Week B=Start C=Clicks D=UV E=New F=Return G=Reads H=Likes
+    #      I=Submit J=OpenForm K=Cancel L=InvSent M=InvOpen N=Deletes O=LikeRate
     headers = [
         "Week", "Week Start", "Clicks", "Unique Visitors",
         "New Visitors", "Returning Visitors", "Reads", "Likes",
         "Submissions", "Open Form", "Cancel", "Invites Sent",
-        "Invites Opened", "Deletes", "Like Rate", "Avg. Daily Visitors"
+        "Invites Opened", "Deletes", "Like Rate"
     ]
     fmt = {
         0: "0", 1: NUM_FMT_DATE, 2: NUM_FMT_INT, 3: NUM_FMT_INT,
         4: NUM_FMT_INT, 5: NUM_FMT_INT, 6: NUM_FMT_INT, 7: NUM_FMT_INT,
         8: NUM_FMT_INT, 9: NUM_FMT_INT, 10: NUM_FMT_INT, 11: NUM_FMT_INT,
-        12: NUM_FMT_INT, 13: NUM_FMT_INT, 14: NUM_FMT_PCT, 15: NUM_FMT_RATIO
+        12: NUM_FMT_INT, 13: NUM_FMT_INT
     }
 
     write_header_row(ws, 1, headers)
     write_data_rows(ws, 2, rows, fmt_map=fmt)
+
+    # Like Rate as formula: =IF(G{r}=0,0,H{r}/G{r})  (Likes/Reads)
+    for ri in range(len(rows)):
+        r = ri + 2
+        write_formula(ws, r, 15, f"=IF(G{r}=0,0,H{r}/G{r})", fmt=NUM_FMT_PCT,
+                      fill=ALT_FILL if ri % 2 == 1 else None)
 
     # Data bars on Clicks and UV columns
     if rows:
@@ -391,7 +430,7 @@ def build_weekly_trend(wb, con):
             ws.conditional_formatting.add(
                 f"{col_letter}2:{col_letter}{last_row}",
                 DataBarRule(start_type="num", start_value=0, end_type="max",
-                            color=LAKE_50, showValue=True)
+                            color=GRAY_III, showValue=True)
             )
 
     finalize_sheet(ws)
@@ -410,7 +449,6 @@ def build_story_performance(wb, con):
                 COUNT(CASE WHEN e.action_type = 'Read' THEN 1 END) as total_reads,
                 COUNT(DISTINCT CASE WHEN e.action_type = 'Read' THEN e.person_hash END) as unique_readers,
                 COUNT(CASE WHEN e.action_type = 'Like' THEN 1 END) as likes,
-                COUNT(CASE WHEN e.action_type = 'Send Invite' THEN 1 END) as invites,
             FROM events e
             WHERE e.story_id IS NOT NULL
             GROUP BY e.story_id
@@ -425,38 +463,53 @@ def build_story_performance(wb, con):
             se.total_reads,
             se.unique_readers,
             se.likes,
-            CASE WHEN se.unique_readers > 0
-                THEN ROUND(se.likes * 1.0 / se.unique_readers, 3)
-                ELSE 0 END as like_rate,
-            se.invites,
             CASE WHEN m.created IS NOT NULL
                 THEN DATEDIFF('day', m.created::DATE,
                     COALESCE(m.deleted_date, CURRENT_DATE)) + 1
-                ELSE NULL END as lifespan_days,
-            CASE WHEN m.created IS NOT NULL
-                    AND DATEDIFF('day', m.created::DATE,
-                        COALESCE(m.deleted_date, CURRENT_DATE)) + 1 > 0
-                THEN ROUND(se.total_reads * 1.0 /
-                    (DATEDIFF('day', m.created::DATE,
-                        COALESCE(m.deleted_date, CURRENT_DATE)) + 1), 1)
-                ELSE NULL END as reads_per_day
+                ELSE NULL END as lifespan_days
         FROM story_events se
         LEFT JOIN story_meta m ON se.story_id = m.story_id
         ORDER BY se.total_reads DESC
     """).fetchall()
 
+    # Col: A=ID B=Title C=Keys D=AuthDiv E=Status F=Created G=Reads H=UniqueReaders
+    #      I=Likes J=LikeRate K=Lifespan L=Reads/Day
     headers = [
         "Story ID", "Title", "Keys", "Author Division", "Status", "Created",
         "Total Reads", "Unique Readers", "Likes", "Like Rate",
-        "Invites", "Lifespan (days)", "Reads/Day"
+        "Lifespan (days)", "Reads/Day"
     ]
     fmt = {
         5: NUM_FMT_DATE, 6: NUM_FMT_INT, 7: NUM_FMT_INT, 8: NUM_FMT_INT,
-        9: NUM_FMT_PCT, 10: NUM_FMT_INT, 11: NUM_FMT_INT, 12: NUM_FMT_RATIO
+        10: NUM_FMT_INT
     }
 
     write_header_row(ws, 1, headers)
-    write_data_rows(ws, 2, rows, fmt_map=fmt)
+    # Write data without the formula columns (Like Rate=col J, Reads/Day=col L)
+    for ri, row_data in enumerate(rows):
+        r = ri + 2
+        # Write cols A-I (indices 0-8) and K (index 9=lifespan)
+        data_cells = list(row_data[:9])  # ID through Likes
+        fill = ALT_FILL if ri % 2 == 1 else None
+        for ci, val in enumerate(data_cells):
+            cell = ws.cell(row=r, column=ci + 1, value=val)
+            cell.border = THIN_BORDER
+            if fill:
+                cell.fill = fill
+            if ci in fmt:
+                cell.number_format = fmt[ci]
+            elif isinstance(val, int):
+                cell.number_format = NUM_FMT_INT
+        # Like Rate formula: =IF(H{r}=0,0,I{r}/H{r})  (Likes/Unique Readers)
+        write_formula(ws, r, 10, f"=IF(H{r}=0,0,I{r}/H{r})", fmt=NUM_FMT_PCT, fill=fill)
+        # Lifespan (col K, from SQL)
+        cell = ws.cell(row=r, column=11, value=row_data[9])
+        cell.border = THIN_BORDER
+        cell.number_format = NUM_FMT_INT
+        if fill:
+            cell.fill = fill
+        # Reads/Day formula: =IF(K{r}=0,"",G{r}/K{r})  (Total Reads/Lifespan)
+        write_formula(ws, r, 12, f'=IF(K{r}=0,"",G{r}/K{r})', fmt=NUM_FMT_RATIO, fill=fill)
 
     finalize_sheet(ws)
     log("  Tab 3: Story Performance")
@@ -464,7 +517,7 @@ def build_story_performance(wb, con):
 
 def build_key_performance(wb, con):
     """Tab 4: Key Performance — which story keys drive the most engagement."""
-    ws = wb.create_sheet("Key Performance")
+    ws = wb.create_sheet("3Keys Performance")
     ws.sheet_properties.tabColor = GRAY_IV
 
     # Check if key columns exist in story_meta
@@ -515,26 +568,32 @@ def build_key_performance(wb, con):
             engagements,
             engaged_visitors,
             reads,
-            likes,
-            CASE WHEN reads > 0 THEN ROUND(likes * 1.0 / reads, 3) ELSE 0 END as like_rate,
-            CASE WHEN stories > 0 THEN ROUND(reads * 1.0 / stories, 1) ELSE 0 END as avg_reads_per_story,
-            CASE WHEN stories > 0 THEN ROUND(likes * 1.0 / stories, 1) ELSE 0 END as avg_likes_per_story
+            likes
         FROM key_engagement
         WHERE key IS NOT NULL AND TRIM(key) != ''
         ORDER BY engagements DESC
     """).fetchall()
 
+    # Col: A=Key B=Stories C=Engagements D=EngVisitors E=Reads F=Likes
+    #      G=LikeRate H=AvgReads/Story I=AvgLikes/Story
     headers = [
         "Key", "Stories", "Engagements", "Engaged Visitors", "Reads", "Likes",
         "Like Rate", "Avg. Reads / Story", "Avg. Likes / Story"
     ]
-    fmt = {
-        1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
-        5: NUM_FMT_INT, 6: NUM_FMT_PCT, 7: NUM_FMT_RATIO, 8: NUM_FMT_RATIO
+    fmt_data = {
+        1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT, 5: NUM_FMT_INT
     }
 
     write_header_row(ws, 1, headers)
-    write_data_rows(ws, 2, rows, fmt_map=fmt)
+    write_data_rows(ws, 2, rows, fmt_map=fmt_data)
+
+    # Formula columns
+    for ri in range(len(rows)):
+        r = ri + 2
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, r, 7, f"=IF(E{r}=0,0,F{r}/E{r})", fmt=NUM_FMT_PCT, fill=fill)
+        write_formula(ws, r, 8, f"=IF(B{r}=0,0,E{r}/B{r})", fmt=NUM_FMT_RATIO, fill=fill)
+        write_formula(ws, r, 9, f"=IF(B{r}=0,0,F{r}/B{r})", fmt=NUM_FMT_RATIO, fill=fill)
 
     finalize_sheet(ws)
     log("  Tab 4: Key Performance")
@@ -556,60 +615,49 @@ def build_division_engagement(wb, con, cols):
             COUNT(DISTINCT person_hash) as engaged_visitors,
             COUNT(*) as engagements,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-            COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as eng_per_visitor,
-            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
-                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
-                ELSE 0 END as like_rate
+            COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
         FROM events
         WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_division, '(Unknown)')
         ORDER BY engaged_visitors DESC
     """).fetchall()
 
-    total_uv = con.execute("""
-        SELECT COUNT(DISTINCT person_hash) FROM events WHERE action_type IN ('Read', 'Like')
-    """).fetchone()[0]
-
+    # Col: A=Division B=EngVisitors C=Engagements D=Reads E=Likes
+    #      F=Eng/Visitor G=LikeRate H=%ofTotal
     headers = [
         "Division", "Engaged Visitors", "Engagements", "Reads", "Likes",
         "Engagements / Visitor", "Like Rate", "% of Total"
     ]
-    fmt = {
-        1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
-        5: NUM_FMT_RATIO, 6: NUM_FMT_PCT, 7: NUM_FMT_PCT
-    }
+    fmt_data = {1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT}
 
     write_header_row(ws, 1, headers)
+    write_data_rows(ws, 2, rows, fmt_map=fmt_data)
 
-    enriched_rows = []
-    for row in rows:
-        row_list = list(row)
-        row_list.append(row[1] / total_uv if total_uv > 0 else 0)
-        enriched_rows.append(tuple(row_list))
+    total_row = len(rows) + 2
 
-    write_data_rows(ws, 2, enriched_rows, fmt_map=fmt)
+    # Formula columns for each data row
+    for ri in range(len(rows)):
+        r = ri + 2
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, r, 6, f"=IF(B{r}=0,0,C{r}/B{r})", fmt=NUM_FMT_RATIO, fill=fill)
+        write_formula(ws, r, 7, f"=IF(D{r}=0,0,E{r}/D{r})", fmt=NUM_FMT_PCT, fill=fill)
+        write_formula(ws, r, 8, f"=IF(B${total_row}=0,0,B{r}/B${total_row})", fmt=NUM_FMT_PCT, fill=fill)
 
-    # Total row
-    totals = con.execute("""
-        SELECT
-            'TOTAL',
-            COUNT(DISTINCT person_hash),
-            COUNT(*),
-            COUNT(CASE WHEN action_type = 'Read' THEN 1 END),
-            COUNT(CASE WHEN action_type = 'Like' THEN 1 END),
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1),
-            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
-                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
-                ELSE 0 END,
-            1.0
-        FROM events
-        WHERE action_type IN ('Read', 'Like')
-    """).fetchone()
-    total_row_idx = len(enriched_rows) + 2
-    write_total_row(ws, total_row_idx, totals, fmt_map=fmt)
+    # Total row with SUM formulas
+    last_data = total_row - 1
+    total_data = ["TOTAL"]
+    ws.cell(row=total_row, column=1, value="TOTAL").font = TOTAL_FONT
+    ws.cell(row=total_row, column=1).fill = TOTAL_FILL
+    ws.cell(row=total_row, column=1).border = THIN_BORDER
+    for ci in range(2, 6):  # B-E: SUM
+        col_l = get_column_letter(ci)
+        write_formula(ws, total_row, ci, f"=SUM({col_l}2:{col_l}{last_data})",
+                      fmt=NUM_FMT_INT, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 6, f"=IF(B{total_row}=0,0,C{total_row}/B{total_row})",
+                  fmt=NUM_FMT_RATIO, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 7, f"=IF(D{total_row}=0,0,E{total_row}/D{total_row})",
+                  fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 8, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
 
     finalize_sheet(ws)
     log("  Tab 4: Division Engagement")
@@ -631,59 +679,47 @@ def build_region_engagement(wb, con, cols):
             COUNT(DISTINCT person_hash) as engaged_visitors,
             COUNT(*) as engagements,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-            COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as eng_per_visitor,
-            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
-                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
-                ELSE 0 END as like_rate
+            COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
         FROM events
         WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_region, '(Unknown)')
         ORDER BY engaged_visitors DESC
     """).fetchall()
 
-    total_uv = con.execute("""
-        SELECT COUNT(DISTINCT person_hash) FROM events WHERE action_type IN ('Read', 'Like')
-    """).fetchone()[0]
-
+    # Col: A=Region B=EngVisitors C=Engagements D=Reads E=Likes
+    #      F=Eng/Visitor G=LikeRate H=%ofTotal
     headers = [
         "Region", "Engaged Visitors", "Engagements", "Reads", "Likes",
         "Engagements / Visitor", "Like Rate", "% of Total"
     ]
-    fmt = {
-        1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
-        5: NUM_FMT_RATIO, 6: NUM_FMT_PCT, 7: NUM_FMT_PCT
-    }
+    fmt_data = {1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT}
 
     write_header_row(ws, 1, headers)
+    write_data_rows(ws, 2, rows, fmt_map=fmt_data)
 
-    enriched_rows = []
-    for row in rows:
-        row_list = list(row)
-        row_list.append(row[1] / total_uv if total_uv > 0 else 0)
-        enriched_rows.append(tuple(row_list))
+    total_row = len(rows) + 2
 
-    write_data_rows(ws, 2, enriched_rows, fmt_map=fmt)
+    for ri in range(len(rows)):
+        r = ri + 2
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, r, 6, f"=IF(B{r}=0,0,C{r}/B{r})", fmt=NUM_FMT_RATIO, fill=fill)
+        write_formula(ws, r, 7, f"=IF(D{r}=0,0,E{r}/D{r})", fmt=NUM_FMT_PCT, fill=fill)
+        write_formula(ws, r, 8, f"=IF(B${total_row}=0,0,B{r}/B${total_row})", fmt=NUM_FMT_PCT, fill=fill)
 
-    # Total row
-    totals = con.execute("""
-        SELECT
-            'TOTAL',
-            COUNT(DISTINCT person_hash),
-            COUNT(*),
-            COUNT(CASE WHEN action_type = 'Read' THEN 1 END),
-            COUNT(CASE WHEN action_type = 'Like' THEN 1 END),
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1),
-            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
-                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
-                ELSE 0 END,
-            1.0
-        FROM events
-        WHERE action_type IN ('Read', 'Like')
-    """).fetchone()
-    write_total_row(ws, len(enriched_rows) + 2, totals, fmt_map=fmt)
+    # Total row with SUM formulas
+    last_data = total_row - 1
+    ws.cell(row=total_row, column=1, value="TOTAL").font = TOTAL_FONT
+    ws.cell(row=total_row, column=1).fill = TOTAL_FILL
+    ws.cell(row=total_row, column=1).border = THIN_BORDER
+    for ci in range(2, 6):
+        col_l = get_column_letter(ci)
+        write_formula(ws, total_row, ci, f"=SUM({col_l}2:{col_l}{last_data})",
+                      fmt=NUM_FMT_INT, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 6, f"=IF(B{total_row}=0,0,C{total_row}/B{total_row})",
+                  fmt=NUM_FMT_RATIO, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 7, f"=IF(D{total_row}=0,0,E{total_row}/D{total_row})",
+                  fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
+    write_formula(ws, total_row, 8, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
 
     finalize_sheet(ws)
     log("  Tab 5: Region Engagement")
@@ -791,87 +827,83 @@ def build_hourly_weekday(wb, con):
     log("  Tab 6: Hourly & Weekday")
 
 
+def _write_funnel(ws, r, title, steps):
+    """Write a funnel section with formula-based percentages. Returns next free row."""
+    write_section_header(ws, r, title, 4); r += 1
+    headers = ["Step", "Unique Visitors", "Conversion Rate", "% of First Step"]
+    write_header_row(ws, r, headers); r += 1
+
+    first_data_row = r
+    for i, (label, count) in enumerate(steps):
+        fill = ALT_FILL if i % 2 == 1 else None
+        cell_a = ws.cell(row=r, column=1, value=label)
+        cell_a.border = THIN_BORDER
+        if fill:
+            cell_a.fill = fill
+        cell_b = ws.cell(row=r, column=2, value=count)
+        cell_b.border = THIN_BORDER
+        cell_b.number_format = NUM_FMT_INT
+        if fill:
+            cell_b.fill = fill
+        # Conversion Rate: % of previous step
+        if i == 0:
+            write_formula(ws, r, 3, "=1", fmt=NUM_FMT_PCT, fill=fill)
+        else:
+            write_formula(ws, r, 3, f"=IF(B{r-1}=0,0,B{r}/B{r-1})",
+                          fmt=NUM_FMT_PCT, fill=fill)
+        # % of first step
+        write_formula(ws, r, 4, f"=IF(B${first_data_row}=0,0,B{r}/B${first_data_row})",
+                      fmt=NUM_FMT_PCT, fill=fill)
+        r += 1
+
+    return r
+
+
 def build_conversion_funnel(wb, con):
-    """Tab 7: Conversion Funnel — user journey depth."""
-    ws = wb.create_sheet("Conversion Funnel")
+    """Tab 7: Conversion Funnels — three separate user journeys."""
+    ws = wb.create_sheet("Conversion Funnels")
     ws.sheet_properties.tabColor = GRAY_IV
 
-    # Funnel: how many unique visitors performed each action type
     funnel = con.execute("""
         SELECT
             COUNT(DISTINCT person_hash) as total_visitors,
             COUNT(DISTINCT CASE WHEN action_type = 'Read' THEN person_hash END) as readers,
             COUNT(DISTINCT CASE WHEN action_type = 'Like' THEN person_hash END) as likers,
-            COUNT(DISTINCT CASE WHEN action_type = 'Open Invite' THEN person_hash END) as invite_openers,
-            COUNT(DISTINCT CASE WHEN action_type = 'Send Invite' THEN person_hash END) as invite_senders,
             COUNT(DISTINCT CASE WHEN action_type = 'Open Form' THEN person_hash END) as form_openers,
-            COUNT(DISTINCT CASE WHEN action_type = 'Submit' THEN person_hash END) as submitters
+            COUNT(DISTINCT CASE WHEN action_type = 'Submit' THEN person_hash END) as submitters,
+            COUNT(DISTINCT CASE WHEN action_type = 'Open Invite' THEN person_hash END) as invite_openers,
+            COUNT(DISTINCT CASE WHEN action_type = 'Send Invite' THEN person_hash END) as invite_senders
         FROM events
     """).fetchone()
 
-    total_uv = funnel[0]
+    total_uv, readers, likers, form_openers, submitters, invite_openers, invite_senders = funnel
 
-    steps = [
-        ("Total Visitors", funnel[0]),
-        ("Read a Story", funnel[1]),
-        ("Liked a Story", funnel[2]),
-        ("Opened Invite Dialog", funnel[3]),
-        ("Sent an Invite", funnel[4]),
-        ("Opened Submission Form", funnel[5]),
-        ("Submitted a Story", funnel[6]),
-    ]
-
+    # Funnel 1: Story Engagement
     r = 1
-    write_section_header(ws, r, "ENGAGEMENT FUNNEL", 4); r += 1
-    headers = ["Step", "Unique Visitors", "% of Previous Step", "% of Total Visitors"]
-    fmt = {1: NUM_FMT_INT, 2: NUM_FMT_PCT, 3: NUM_FMT_PCT}
-    write_header_row(ws, r, headers); r += 1
+    r = _write_funnel(ws, r, "STORY ENGAGEMENT FUNNEL", [
+        ("Total Visitors", total_uv),
+        ("Read a Story", readers),
+        ("Liked a Story", likers),
+    ])
+    r += 1
 
-    for i, (label, count) in enumerate(steps):
-        prev_count = steps[i - 1][1] if i > 0 else count
-        pct_prev = count / prev_count if prev_count > 0 else 0
-        pct_total = count / total_uv if total_uv > 0 else 0
-        row_data = (label, count, pct_prev, pct_total)
-        write_data_rows(ws, r, [row_data], fmt_map=fmt)
-        r += 1
+    # Funnel 2: Story Creation
+    r = _write_funnel(ws, r, "STORY CREATION FUNNEL", [
+        ("Total Visitors", total_uv),
+        ("Opened Submission Form", form_openers),
+        ("Submitted a Story", submitters),
+    ])
+    r += 1
 
-    r += 2
-
-    # Multi-action depth
-    write_section_header(ws, r, "ENGAGEMENT DEPTH (Distinct Action Types per Visitor)", 3); r += 1
-    depth_headers = ["Action Types Used", "Visitors", "% of Total"]
-    write_header_row(ws, r, depth_headers); r += 1
-
-    depth_rows = con.execute("""
-        WITH visitor_depth AS (
-            SELECT person_hash, COUNT(DISTINCT action_type) as n_actions
-            FROM events
-            GROUP BY person_hash
-        )
-        SELECT
-            CASE
-                WHEN n_actions = 1 THEN '1 action type'
-                WHEN n_actions = 2 THEN '2 action types'
-                WHEN n_actions = 3 THEN '3 action types'
-                ELSE '4+ action types'
-            END as depth,
-            COUNT(*) as visitors,
-            ROUND(COUNT(*) * 1.0 / (SELECT COUNT(*) FROM visitor_depth), 3) as pct
-        FROM visitor_depth
-        GROUP BY CASE
-                WHEN n_actions = 1 THEN '1 action type'
-                WHEN n_actions = 2 THEN '2 action types'
-                WHEN n_actions = 3 THEN '3 action types'
-                ELSE '4+ action types'
-            END
-        ORDER BY depth
-    """).fetchall()
-
-    fmt_d = {1: NUM_FMT_INT, 2: NUM_FMT_PCT}
-    write_data_rows(ws, r, depth_rows, fmt_map=fmt_d)
+    # Funnel 3: Invite Conversion
+    r = _write_funnel(ws, r, "INVITE CONVERSION FUNNEL", [
+        ("Total Visitors", total_uv),
+        ("Opened Invite Dialog", invite_openers),
+        ("Sent an Invite", invite_senders),
+    ])
 
     finalize_sheet(ws, freeze_row=1)
-    log("  Tab 7: Conversion Funnel")
+    log("  Tab 7: Conversion Funnels")
 
 
 # ---------------------------------------------------------------------------
