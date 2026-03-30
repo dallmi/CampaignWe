@@ -16,7 +16,7 @@ Input:
     - output/story_metadata.parquet
 
 Output:
-    - output/campaignwe_report.xlsx (7 tabs)
+    - output/campaignwe_report.xlsx (8 tabs)
 """
 
 import argparse
@@ -35,6 +35,7 @@ from openpyxl.utils import get_column_letter
 # ---------------------------------------------------------------------------
 CORP_RED = "E60000"
 BORDEAUX_I = "BD000C"
+LAKE_50 = "0C7EC6"
 WHITE = "FFFFFF"
 BLACK = "000000"
 GRAY_I = "CCCABC"
@@ -42,6 +43,7 @@ GRAY_IV = "7A7870"
 GRAY_VI = "404040"
 PASTEL_I = "ECEBE4"
 ROW_ALT = "F8F7F2"
+BRONZE_I = "B98E2C"
 RAG_GREEN = "6F7A1A"
 RAG_AMBER = "E4A911"
 
@@ -49,7 +51,7 @@ RAG_AMBER = "E4A911"
 # Reusable styles
 # ---------------------------------------------------------------------------
 HEADER_FONT = Font(bold=True, color=WHITE, size=11)
-HEADER_FILL = PatternFill(start_color=CORP_RED, end_color=CORP_RED, fill_type="solid")
+HEADER_FILL = PatternFill(start_color=GRAY_VI, end_color=GRAY_VI, fill_type="solid")
 SECTION_FONT = Font(bold=True, color=GRAY_VI, size=11)
 SECTION_FILL = PatternFill(start_color=PASTEL_I, end_color=PASTEL_I, fill_type="solid")
 ALT_FILL = PatternFill(start_color=ROW_ALT, end_color=ROW_ALT, fill_type="solid")
@@ -214,7 +216,7 @@ def load_data(events_path, metadata_path, date_from=None, date_to=None):
 def build_executive_summary(wb, con, cols):
     """Tab 1: Executive Summary — KPIs at a glance."""
     ws = wb.create_sheet("Executive Summary")
-    ws.sheet_properties.tabColor = CORP_RED
+    ws.sheet_properties.tabColor = BRONZE_I
 
     kpis = con.execute("""
         SELECT
@@ -239,9 +241,12 @@ def build_executive_summary(wb, con, cols):
     first_date, last_date, duration, total, uv, sessions, stories = kpis[:7]
     reads, likes, submits, open_forms, cancels, deletes, invites_sent, invites_opened = kpis[7:]
 
-    # Active stories count
+    # Story counts from metadata
     active_stories = con.execute("""
         SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'active'
+    """).fetchone()[0]
+    deleted_stories = con.execute("""
+        SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'deleted'
     """).fetchone()[0]
 
     # Org coverage
@@ -263,10 +268,10 @@ def build_executive_summary(wb, con, cols):
     r += 1
 
     write_section_header(ws, r, "REACH", 2); r += 1
-    write_kpi_row(ws, r, "Total Interactions", total, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Total Clicks", total, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Unique Visitors", uv, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Unique Sessions", sessions, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Avg. Interactions / Visitor",
+    write_kpi_row(ws, r, "Avg. Clicks / Visitor",
                   round(total / uv, 1) if uv > 0 else 0); r += 1
     write_kpi_row(ws, r, "Avg. Daily Visitors",
                   round(uv / duration, 1) if duration > 0 else 0); r += 1
@@ -286,6 +291,7 @@ def build_executive_summary(wb, con, cols):
     write_section_header(ws, r, "CONTENT", 2); r += 1
     write_kpi_row(ws, r, "Total Stories (all time)", stories, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Active Stories", active_stories, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Deleted Stories", deleted_stories, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Avg. Reads / Active Story",
                   round(reads / active_stories, 1) if active_stories > 0 else 0); r += 1
     write_kpi_row(ws, r, "Avg. Likes / Active Story",
@@ -298,7 +304,7 @@ def build_executive_summary(wb, con, cols):
     submit_rate = submits / open_forms if open_forms > 0 else 0
     write_kpi_row(ws, r, "Submission Rate (Submit / Open Form)", submit_rate, fmt=NUM_FMT_PCT); r += 1
     write_kpi_row(ws, r, "Cancelled", cancels, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Deleted Stories", deletes, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Delete Confirmations (Clicks)", deletes, fmt=NUM_FMT_INT); r += 1
 
     ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 22
@@ -316,11 +322,16 @@ def build_weekly_trend(wb, con):
             SELECT
                 YEARWEEK(session_date) as yw,
                 MIN(session_date) as week_start,
-                COUNT(*) as interactions,
+                COUNT(*) as clicks,
                 COUNT(DISTINCT person_hash) as uv,
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
                 COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
+                COUNT(CASE WHEN action_type = 'Open Form' THEN 1 END) as open_forms,
+                COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels,
+                COUNT(CASE WHEN action_type = 'Send Invite' THEN 1 END) as invites_sent,
+                COUNT(CASE WHEN action_type = 'Open Invite' THEN 1 END) as invites_opened,
+                COUNT(CASE WHEN action_type = 'Delete' THEN 1 END) as deletes,
                 COUNT(DISTINCT session_date) as active_days
             FROM events
             GROUP BY YEARWEEK(session_date)
@@ -338,13 +349,18 @@ def build_weekly_trend(wb, con):
         SELECT
             w.yw,
             w.week_start,
-            w.interactions,
+            w.clicks,
             w.uv,
             COALESCE(n.new_visitors, 0) as new_visitors,
             w.uv - COALESCE(n.new_visitors, 0) as returning_visitors,
             w.reads,
             w.likes,
             w.submits,
+            w.open_forms,
+            w.cancels,
+            w.invites_sent,
+            w.invites_opened,
+            w.deletes,
             CASE WHEN w.reads > 0 THEN ROUND(w.likes * 1.0 / w.reads, 3) ELSE 0 END as like_rate,
             CASE WHEN w.active_days > 0 THEN ROUND(w.uv * 1.0 / w.active_days, 1) ELSE 0 END as avg_daily_uv
         FROM weekly w
@@ -353,27 +369,29 @@ def build_weekly_trend(wb, con):
     """).fetchall()
 
     headers = [
-        "Week", "Week Start", "Interactions", "Unique Visitors",
+        "Week", "Week Start", "Clicks", "Unique Visitors",
         "New Visitors", "Returning Visitors", "Reads", "Likes",
-        "Submissions", "Like Rate", "Avg. Daily Visitors"
+        "Submissions", "Open Form", "Cancel", "Invites Sent",
+        "Invites Opened", "Deletes", "Like Rate", "Avg. Daily Visitors"
     ]
     fmt = {
         0: "0", 1: NUM_FMT_DATE, 2: NUM_FMT_INT, 3: NUM_FMT_INT,
         4: NUM_FMT_INT, 5: NUM_FMT_INT, 6: NUM_FMT_INT, 7: NUM_FMT_INT,
-        8: NUM_FMT_INT, 9: NUM_FMT_PCT, 10: NUM_FMT_RATIO
+        8: NUM_FMT_INT, 9: NUM_FMT_INT, 10: NUM_FMT_INT, 11: NUM_FMT_INT,
+        12: NUM_FMT_INT, 13: NUM_FMT_INT, 14: NUM_FMT_PCT, 15: NUM_FMT_RATIO
     }
 
     write_header_row(ws, 1, headers)
     write_data_rows(ws, 2, rows, fmt_map=fmt)
 
-    # Data bars on Interactions and UV columns
+    # Data bars on Clicks and UV columns
     if rows:
         last_row = len(rows) + 1
         for col_letter in ["C", "D"]:
             ws.conditional_formatting.add(
                 f"{col_letter}2:{col_letter}{last_row}",
-                DataBarRule(start_type="min", end_type="max",
-                            color=CORP_RED, showValue=True)
+                DataBarRule(start_type="num", start_value=0, end_type="max",
+                            color=LAKE_50, showValue=True)
             )
 
     finalize_sheet(ws)
@@ -400,6 +418,7 @@ def build_story_performance(wb, con):
         SELECT
             se.story_id,
             COALESCE(m.story_title, '(unknown)') as title,
+            COALESCE(m.keys, '') as keys,
             COALESCE(m.author_division, '') as author_division,
             COALESCE(m.status, 'unknown') as status,
             m.created,
@@ -427,28 +446,98 @@ def build_story_performance(wb, con):
     """).fetchall()
 
     headers = [
-        "Story ID", "Title", "Author Division", "Status", "Created",
+        "Story ID", "Title", "Keys", "Author Division", "Status", "Created",
         "Total Reads", "Unique Readers", "Likes", "Like Rate",
         "Invites", "Lifespan (days)", "Reads/Day"
     ]
     fmt = {
-        4: NUM_FMT_DATE, 5: NUM_FMT_INT, 6: NUM_FMT_INT, 7: NUM_FMT_INT,
-        8: NUM_FMT_PCT, 9: NUM_FMT_INT, 10: NUM_FMT_INT, 11: NUM_FMT_RATIO
+        5: NUM_FMT_DATE, 6: NUM_FMT_INT, 7: NUM_FMT_INT, 8: NUM_FMT_INT,
+        9: NUM_FMT_PCT, 10: NUM_FMT_INT, 11: NUM_FMT_INT, 12: NUM_FMT_RATIO
     }
 
     write_header_row(ws, 1, headers)
     write_data_rows(ws, 2, rows, fmt_map=fmt)
 
-    # Highlight top 5 / bottom 5 by reads (column F)
-    if len(rows) > 5:
-        last_row = len(rows) + 1
-        green_fill = PatternFill(start_color=RAG_GREEN, end_color=RAG_GREEN, fill_type="solid")
-        for r in range(2, min(7, last_row + 1)):
-            ws.cell(row=r, column=6).fill = green_fill
-            ws.cell(row=r, column=6).font = Font(color=WHITE, bold=True)
-
     finalize_sheet(ws)
     log("  Tab 3: Story Performance")
+
+
+def build_key_performance(wb, con):
+    """Tab 4: Key Performance — which story keys drive the most engagement."""
+    ws = wb.create_sheet("Key Performance")
+    ws.sheet_properties.tabColor = GRAY_IV
+
+    # Check if key columns exist in story_meta
+    meta_cols = [r[0] for r in con.execute("DESCRIBE story_meta").fetchall()]
+    has_split_keys = all(f"story_key{i}" in meta_cols for i in range(1, 4))
+    has_keys = "keys" in meta_cols
+
+    if not has_keys and not has_split_keys:
+        ws.cell(row=1, column=1, value="No key data available in story metadata")
+        log("  Tab 4: Key Performance (skipped — no key data)")
+        return
+
+    # Unpivot keys: each story can have up to 3 keys, we need one row per key
+    if has_split_keys:
+        key_union = """
+            SELECT story_id, TRIM(story_key1) as key FROM story_meta WHERE TRIM(COALESCE(story_key1, '')) != ''
+            UNION ALL
+            SELECT story_id, TRIM(story_key2) FROM story_meta WHERE TRIM(COALESCE(story_key2, '')) != ''
+            UNION ALL
+            SELECT story_id, TRIM(story_key3) FROM story_meta WHERE TRIM(COALESCE(story_key3, '')) != ''
+        """
+    else:
+        key_union = """
+            SELECT story_id, TRIM(UNNEST(string_split(keys, ','))) as key
+            FROM story_meta
+            WHERE keys IS NOT NULL AND TRIM(keys) != ''
+        """
+
+    rows = con.execute(f"""
+        WITH story_keys AS ({key_union}),
+        key_engagement AS (
+            SELECT
+                sk.key,
+                COUNT(DISTINCT sk.story_id) as stories,
+                COUNT(CASE WHEN e.action_type = 'Read' THEN 1 END) as reads,
+                COUNT(DISTINCT CASE WHEN e.action_type = 'Read' THEN e.person_hash END) as unique_readers,
+                COUNT(CASE WHEN e.action_type = 'Like' THEN 1 END) as likes,
+                COUNT(CASE WHEN e.action_type IN ('Read', 'Like') THEN 1 END) as engagements,
+                COUNT(DISTINCT CASE WHEN e.action_type IN ('Read', 'Like') THEN e.person_hash END) as engaged_visitors
+            FROM story_keys sk
+            LEFT JOIN events e ON sk.story_id = e.story_id
+                AND e.action_type IN ('Read', 'Like')
+            GROUP BY sk.key
+        )
+        SELECT
+            key,
+            stories,
+            engagements,
+            engaged_visitors,
+            reads,
+            likes,
+            CASE WHEN reads > 0 THEN ROUND(likes * 1.0 / reads, 3) ELSE 0 END as like_rate,
+            CASE WHEN stories > 0 THEN ROUND(reads * 1.0 / stories, 1) ELSE 0 END as avg_reads_per_story,
+            CASE WHEN stories > 0 THEN ROUND(likes * 1.0 / stories, 1) ELSE 0 END as avg_likes_per_story
+        FROM key_engagement
+        WHERE key IS NOT NULL AND TRIM(key) != ''
+        ORDER BY engagements DESC
+    """).fetchall()
+
+    headers = [
+        "Key", "Stories", "Engagements", "Engaged Visitors", "Reads", "Likes",
+        "Like Rate", "Avg. Reads / Story", "Avg. Likes / Story"
+    ]
+    fmt = {
+        1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
+        5: NUM_FMT_INT, 6: NUM_FMT_PCT, 7: NUM_FMT_RATIO, 8: NUM_FMT_RATIO
+    }
+
+    write_header_row(ws, 1, headers)
+    write_data_rows(ws, 2, rows, fmt_map=fmt)
+
+    finalize_sheet(ws)
+    log("  Tab 4: Key Performance")
 
 
 def build_division_engagement(wb, con, cols):
@@ -464,35 +553,36 @@ def build_division_engagement(wb, con, cols):
     rows = con.execute("""
         SELECT
             COALESCE(visitor_division, '(Unknown)') as division,
-            COUNT(DISTINCT person_hash) as uv,
-            COUNT(*) as interactions,
+            COUNT(DISTINCT person_hash) as engaged_visitors,
+            COUNT(*) as engagements,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-            COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as interactions_per_visitor,
+            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as eng_per_visitor,
             CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
                 THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
                     COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
                 ELSE 0 END as like_rate
         FROM events
+        WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_division, '(Unknown)')
-        ORDER BY uv DESC
+        ORDER BY engaged_visitors DESC
     """).fetchall()
 
-    total_uv = con.execute("SELECT COUNT(DISTINCT person_hash) FROM events").fetchone()[0]
+    total_uv = con.execute("""
+        SELECT COUNT(DISTINCT person_hash) FROM events WHERE action_type IN ('Read', 'Like')
+    """).fetchone()[0]
 
     headers = [
-        "Division", "Unique Visitors", "Interactions", "Reads", "Likes",
-        "Submissions", "Interactions/Visitor", "Like Rate", "% of Total UV"
+        "Division", "Engaged Visitors", "Engagements", "Reads", "Likes",
+        "Engagements / Visitor", "Like Rate", "% of Total"
     ]
     fmt = {
         1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
-        5: NUM_FMT_INT, 6: NUM_FMT_RATIO, 7: NUM_FMT_PCT, 8: NUM_FMT_PCT
+        5: NUM_FMT_RATIO, 6: NUM_FMT_PCT, 7: NUM_FMT_PCT
     }
 
     write_header_row(ws, 1, headers)
 
-    # Add UV percentage column to each row
     enriched_rows = []
     for row in rows:
         row_list = list(row)
@@ -509,7 +599,6 @@ def build_division_engagement(wb, con, cols):
             COUNT(*),
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END),
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END),
-            COUNT(CASE WHEN action_type = 'Submit' THEN 1 END),
             ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1),
             CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
                 THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
@@ -517,6 +606,7 @@ def build_division_engagement(wb, con, cols):
                 ELSE 0 END,
             1.0
         FROM events
+        WHERE action_type IN ('Read', 'Like')
     """).fetchone()
     total_row_idx = len(enriched_rows) + 2
     write_total_row(ws, total_row_idx, totals, fmt_map=fmt)
@@ -538,25 +628,32 @@ def build_region_engagement(wb, con, cols):
     rows = con.execute("""
         SELECT
             COALESCE(visitor_region, '(Unknown)') as region,
-            COUNT(DISTINCT person_hash) as uv,
-            COUNT(*) as interactions,
+            COUNT(DISTINCT person_hash) as engaged_visitors,
+            COUNT(*) as engagements,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as interactions_per_visitor
+            ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1) as eng_per_visitor,
+            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
+                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
+                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
+                ELSE 0 END as like_rate
         FROM events
+        WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_region, '(Unknown)')
-        ORDER BY uv DESC
+        ORDER BY engaged_visitors DESC
     """).fetchall()
 
-    total_uv = con.execute("SELECT COUNT(DISTINCT person_hash) FROM events").fetchone()[0]
+    total_uv = con.execute("""
+        SELECT COUNT(DISTINCT person_hash) FROM events WHERE action_type IN ('Read', 'Like')
+    """).fetchone()[0]
 
     headers = [
-        "Region", "Unique Visitors", "Interactions", "Reads", "Likes",
-        "Interactions/Visitor", "% of Total UV"
+        "Region", "Engaged Visitors", "Engagements", "Reads", "Likes",
+        "Engagements / Visitor", "Like Rate", "% of Total"
     ]
     fmt = {
         1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT,
-        5: NUM_FMT_RATIO, 6: NUM_FMT_PCT
+        5: NUM_FMT_RATIO, 6: NUM_FMT_PCT, 7: NUM_FMT_PCT
     }
 
     write_header_row(ws, 1, headers)
@@ -578,8 +675,13 @@ def build_region_engagement(wb, con, cols):
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END),
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END),
             ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT person_hash), 0), 1),
+            CASE WHEN COUNT(CASE WHEN action_type = 'Read' THEN 1 END) > 0
+                THEN ROUND(COUNT(CASE WHEN action_type = 'Like' THEN 1 END) * 1.0 /
+                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END), 3)
+                ELSE 0 END,
             1.0
         FROM events
+        WHERE action_type IN ('Read', 'Like')
     """).fetchone()
     write_total_row(ws, len(enriched_rows) + 2, totals, fmt_map=fmt)
 
@@ -592,21 +694,25 @@ def build_hourly_weekday(wb, con):
     ws = wb.create_sheet("Hourly & Weekday")
     ws.sheet_properties.tabColor = GRAY_IV
 
+    # All three parts filtered to engagement = Read + Like
+    ENG_FILTER = "WHERE action_type IN ('Read', 'Like')"
+
     # Part A: Weekday summary
     r = 1
-    write_section_header(ws, r, "WEEKDAY SUMMARY", 6); r += 1
-    weekday_headers = ["Weekday", "Interactions", "Unique Visitors", "Reads", "Likes", "Avg. per Day"]
+    write_section_header(ws, r, "WEEKDAY SUMMARY (Engagement: Reads + Likes)", 6); r += 1
+    weekday_headers = ["Weekday", "Engagements", "Engaged Visitors", "Reads", "Likes", "Avg. per Day"]
     write_header_row(ws, r, weekday_headers); r += 1
 
-    weekday_rows = con.execute("""
+    weekday_rows = con.execute(f"""
         SELECT
             event_weekday,
-            COUNT(*) as interactions,
+            COUNT(*) as engagements,
             COUNT(DISTINCT person_hash) as uv,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
             ROUND(COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT session_date), 0), 1) as avg_per_day
         FROM events
+        {ENG_FILTER}
         GROUP BY event_weekday, event_weekday_num
         ORDER BY event_weekday_num
     """).fetchall()
@@ -616,16 +722,17 @@ def build_hourly_weekday(wb, con):
     r += len(weekday_rows) + 2
 
     # Part B: Hourly summary
-    write_section_header(ws, r, "HOURLY SUMMARY (CET)", 4); r += 1
-    hourly_headers = ["Hour (CET)", "Interactions", "Unique Visitors"]
+    write_section_header(ws, r, "HOURLY SUMMARY (Engagement, CET)", 4); r += 1
+    hourly_headers = ["Hour (CET)", "Engagements", "Engaged Visitors"]
     write_header_row(ws, r, hourly_headers); r += 1
 
-    hourly_rows = con.execute("""
+    hourly_rows = con.execute(f"""
         SELECT
             event_hour,
-            COUNT(*) as interactions,
+            COUNT(*) as engagements,
             COUNT(DISTINCT person_hash) as uv
         FROM events
+        {ENG_FILTER}
         GROUP BY event_hour
         ORDER BY event_hour
     """).fetchall()
@@ -635,14 +742,15 @@ def build_hourly_weekday(wb, con):
     r += len(hourly_rows) + 2
 
     # Part C: Heatmap matrix (weekday x hour)
-    write_section_header(ws, r, "ACTIVITY HEATMAP (Interactions by Weekday x Hour CET)", 26); r += 1
+    write_section_header(ws, r, "ENGAGEMENT HEATMAP (Reads + Likes by Weekday x Hour CET)", 26); r += 1
 
     heatmap_headers = [""] + [f"{h:02d}" for h in range(24)]
     write_header_row(ws, r, heatmap_headers); r += 1
 
-    heatmap_data = con.execute("""
+    heatmap_data = con.execute(f"""
         SELECT event_weekday, event_weekday_num, event_hour, COUNT(*) as cnt
         FROM events
+        {ENG_FILTER}
         GROUP BY event_weekday, event_weekday_num, event_hour
         ORDER BY event_weekday_num, event_hour
     """).fetchall()
@@ -803,6 +911,7 @@ def main():
     build_executive_summary(wb, con, cols)
     build_weekly_trend(wb, con)
     build_story_performance(wb, con)
+    build_key_performance(wb, con)
     build_division_engagement(wb, con, cols)
     build_region_engagement(wb, con, cols)
     build_hourly_weekday(wb, con)
