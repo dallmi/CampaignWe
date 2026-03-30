@@ -276,16 +276,27 @@ def build_executive_summary(wb, con, cols):
 
     write_section_header(ws, r, "REACH", 2); r += 1
     write_kpi_row(ws, r, "Total Clicks", total, fmt=NUM_FMT_INT); row_clicks = r; r += 1
-    # Click breakdown with formulas for % share
-    write_kpi_row(ws, r, "  Engagement (Read + Like)", engagement_clicks, fmt=NUM_FMT_INT); row_eng = r; r += 1
-    write_kpi_row(ws, r, "  Invite (Open + Send)", invite_clicks, fmt=NUM_FMT_INT); row_inv = r; r += 1
-    write_kpi_row(ws, r, "  Submission (Form + Submit + Cancel + Delete)", submission_clicks, fmt=NUM_FMT_INT); row_sub = r; r += 1
-    # Add % column (column C) for the breakdown
-    ws.cell(row=row_clicks, column=3).value = "Share"
-    ws.cell(row=row_clicks, column=3).font = Font(bold=True, color=GRAY_VI)
-    ws.cell(row=row_clicks, column=3).border = THIN_BORDER
-    for br in [row_eng, row_inv, row_sub]:
-        write_formula(ws, br, 3, f"=IF(B${row_clicks}=0,0,B{br}/B${row_clicks})", fmt=NUM_FMT_PCT)
+    # Click breakdown — % share baked into label via formula, smaller italic font
+    SUB_FONT = Font(italic=True, color=GRAY_IV, size=10)
+    breakdown = [
+        (r, "Engagement (Read + Like)", engagement_clicks),
+        (r + 1, "Invite (Open + Send)", invite_clicks),
+        (r + 2, "Submission (Form + Submit + Cancel + Delete)", submission_clicks),
+    ]
+    for br_row, label, count in breakdown:
+        # Column A: formula that concatenates the % with the label
+        cell_a = ws.cell(row=br_row, column=1)
+        cell_a.value = f'=TEXT(IF(B${row_clicks}=0,0,B{br_row}/B${row_clicks}),"0%") & "  {label}"'
+        cell_a.font = SUB_FONT
+        cell_a.border = THIN_BORDER
+        cell_a.alignment = Alignment(indent=4)
+        # Column B: raw count
+        cell_b = ws.cell(row=br_row, column=2, value=count)
+        cell_b.font = SUB_FONT
+        cell_b.border = THIN_BORDER
+        cell_b.alignment = Alignment(horizontal="right")
+        cell_b.number_format = NUM_FMT_INT
+    r += 3
     write_kpi_row(ws, r, "Unique Visitors", uv, fmt=NUM_FMT_INT); row_uv = r; r += 1
     write_kpi_row(ws, r, "Unique Sessions", sessions, fmt=NUM_FMT_INT); r += 1
     # Formula: Total Clicks / Unique Visitors
@@ -830,7 +841,7 @@ def build_hourly_weekday(wb, con):
 def _write_funnel(ws, r, title, steps):
     """Write a funnel section with formula-based percentages. Returns next free row."""
     write_section_header(ws, r, title, 4); r += 1
-    headers = ["Step", "Unique Visitors", "Conversion Rate", "% of First Step"]
+    headers = ["Step", "Unique Visitors", "% of Previous Step", "% of First Step"]
     write_header_row(ws, r, headers); r += 1
 
     first_data_row = r
