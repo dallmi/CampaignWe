@@ -917,6 +917,101 @@ def build_conversion_funnel(wb, con):
     log("  Tab 7: Conversion Funnels")
 
 
+def build_glossary(wb):
+    """Tab 8: Glossary — metric definitions and context for report readers."""
+    ws = wb.create_sheet("Glossary")
+    ws.sheet_properties.tabColor = GRAY_IV
+    ws.sheet_view.showGridLines = False
+
+    TITLE_FONT = Font(bold=True, color=GRAY_VI, size=13)
+    HEADING_FONT = Font(bold=True, color=GRAY_VI, size=11)
+    BODY_FONT = Font(color=GRAY_VI, size=10)
+    TERM_FONT = Font(bold=True, color=BLACK, size=10)
+
+    r = 1
+    ws.cell(row=r, column=1, value="Glossary").font = TITLE_FONT
+    r += 2
+
+    def heading(text):
+        nonlocal r
+        ws.cell(row=r, column=1, value=text).font = HEADING_FONT
+        r += 1
+
+    def term(name, definition):
+        nonlocal r
+        ws.cell(row=r, column=1, value=name).font = TERM_FONT
+        ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+        ws.cell(row=r, column=2, value=definition).font = BODY_FONT
+        ws.cell(row=r, column=2).alignment = Alignment(wrap_text=True)
+        r += 1
+
+    def blank():
+        nonlocal r
+        r += 1
+
+    # --- Metrics ---
+    heading("Metrics")
+    term("Total Clicks", "All tracked user interactions on the platform (Reads, Likes, Form actions, Invites).")
+    term("Unique Visitors", "Number of distinct users who performed at least one click.")
+    term("Unique Sessions", "Number of distinct browsing sessions (one user can have multiple sessions).")
+    term("Engaged Visitors", "Users who performed at least one Read or Like.")
+    term("Engagements", "Total count of Read and Like actions combined.")
+    term("Like Rate", "Likes divided by Reads (or Unique Readers). Shows how often readers appreciate a story.")
+    term("Reads/Day", "Total Reads divided by story lifespan in days. Normalizes for story age.")
+    blank()
+
+    # --- Action Types ---
+    heading("Action Types")
+    term("Read", "User opened or expanded a story to view its content.")
+    term("Like", "User liked a story.")
+    term("Open Form", "User opened the story submission form.")
+    term("Submit", "User submitted a new story.")
+    term("Cancel", "User closed the submission form without submitting.")
+    term("Delete", "User confirmed deletion of a story.")
+    term("Open Invite", "User opened the colleague invite dialog.")
+    term("Send Invite", "User sent an invitation to colleagues.")
+    blank()
+
+    # --- Click Categories ---
+    heading("Click Categories (Executive Summary)")
+    term("Engagement", "Read + Like. Represents genuine story consumption and appreciation.")
+    term("Invite", "Open Invite + Send Invite. Represents viral/sharing behavior.")
+    term("Submission", "Open Form + Submit + Cancel + Delete. Represents content creation activity.")
+    blank()
+
+    # --- Engagement Definition ---
+    heading("Engagement Definition")
+    ws.cell(row=r, column=1).font = BODY_FONT
+    ws.cell(row=r, column=1, value=(
+        "Throughout this report, 'engagement' is defined as Read + Like actions. "
+        "These represent meaningful interaction with story content. Other click types "
+        "(form actions, invites) are tracked separately as they represent different user journeys."
+    )).alignment = Alignment(wrap_text=True)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=2)
+    r += 2
+
+    # --- Funnels ---
+    heading("Conversion Funnels")
+    term("Story Engagement", "Total Visitors > Read a Story > Liked a Story")
+    term("Story Creation", "Total Visitors > Opened Submission Form > Submitted a Story")
+    term("Invite Conversion", "Total Visitors > Opened Invite Dialog > Sent an Invite")
+    term("% of Previous Step", "Percentage of users who progressed from the immediately preceding step.")
+    term("% of First Step", "Percentage relative to Total Visitors (the funnel entry point).")
+    blank()
+
+    # --- Data Notes ---
+    heading("Data Notes")
+    term("Timezone", "All timestamps and session dates are in Central European Time (CET/CEST).")
+    term("Deleted Stories", "Stories removed from the platform. Historical engagement data up to the deletion date is preserved.")
+    term("3Keys", "Up to three category tags assigned to each story. Used to analyze which topics resonate most.")
+
+    # Column widths
+    ws.column_dimensions["A"].width = 28
+    ws.column_dimensions["B"].width = 80
+
+    log("  Tab 8: Glossary")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -935,7 +1030,8 @@ def main():
     events_path = output_dir / "events_anonymized.parquet"
     metadata_path = output_dir / "story_metadata.parquet"
 
-    output_path = Path(args.output) if args.output else output_dir / "campaignwe_report.xlsx"
+    today = date.today().strftime("%Y_%m_%d")
+    output_path = Path(args.output) if args.output else output_dir / f"campaignwe_report_{today}.xlsx"
 
     log("=" * 64)
     log("  CampaignWe XLSX Report Generator")
@@ -959,6 +1055,7 @@ def main():
     build_region_engagement(wb, con, cols)
     build_hourly_weekday(wb, con)
     build_conversion_funnel(wb, con)
+    build_glossary(wb)
 
     log()
     log(f"Saving to {output_path}...")
