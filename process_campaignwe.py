@@ -901,65 +901,113 @@ def export_parquet_files(con, output_dir):
         excluded = total_before - row_count
         log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched + post-delete)")
 
-        # Export excluded story details (non-Other events with story_id but no story_title)
-        excluded_df = con.execute("""
+        # Export all excluded events to XLSX for transparency
+        has_deleted = 'story_deleted_date' in evt_cols
+        ll_col = next((c for c in ['CP_Link_label', 'CP_link_label'] if c in evt_cols), None)
+
+        # Build exclusion reason for every event
+        reason_case = """
+            CASE
+                WHEN action_type = 'Other' THEN 'Other'
+                WHEN story_id IS NOT NULL AND story_title IS NULL THEN 'No story title'
+                WHEN story_deleted_date IS NOT NULL
+                     AND CAST(timestamp AS DATE) > story_deleted_date THEN 'Post-delete'
+                WHEN story_id IS NULL
+                     AND action_type NOT IN ('Open Form','Submit','Cancel','Send Invite','Open Invite','Delete')
+                     THEN 'No story ID'
+                ELSE NULL
+            END
+        """ if has_deleted else """
+            CASE
+                WHEN action_type = 'Other' THEN 'Other'
+                WHEN story_id IS NOT NULL AND story_title IS NULL THEN 'No story title'
+                WHEN story_id IS NULL
+                     AND action_type NOT IN ('Open Form','Submit','Cancel','Send Invite','Open Invite','Delete')
+                     THEN 'No story ID'
+                ELSE NULL
+            END
+        """
+
+        # Available metadata columns to include
+        meta_cols = [c for c in ['story_text', 'story_keys', 'story_deleted_date', 'story_title']
+                     if c in evt_cols]
+        meta_select = ', '.join(f'CAST(MAX({c}) AS VARCHAR) as {c}' for c in meta_cols)
+        meta_select_prefix = ', ' + meta_select if meta_select else ''
+        ll_select = f', COALESCE("{ll_col}", \'(NULL)\') as link_label' if ll_col else ''
+        ll_group = f', "{ll_col}"' if ll_col else ''
+        ll_alias_group = ', link_label' if ll_col else ''
+
+        # Summary sheet: one row per exclusion_reason
+        summary_df = con.execute(f"""
+            WITH excluded AS (
+                SELECT *, {reason_case} as exclusion_reason
+                FROM events
+            )
             SELECT
-                story_id,
+                exclusion_reason,
+                COUNT(*) as event_count,
+                COUNT(DISTINCT story_id) as unique_stories,
+                COUNT(DISTINCT person_hash) as unique_users
+            FROM excluded
+            WHERE exclusion_reason IS NOT NULL
+            GROUP BY exclusion_reason
+            ORDER BY event_count DESC
+        """).df()
+
+        # Detail sheet: per story_id and action_type
+        detail_df = con.execute(f"""
+            WITH excluded AS (
+                SELECT *, {reason_case} as exclusion_reason
+                FROM events
+            )
+            SELECT
+                exclusion_reason,
+                COALESCE(story_id, '(none)') as story_id,
                 action_type,
                 COUNT(*) as event_count,
                 COUNT(DISTINCT person_hash) as unique_users,
                 CAST(MIN(timestamp) AS VARCHAR) as first_event,
                 CAST(MAX(timestamp) AS VARCHAR) as last_event
-            FROM events
-            WHERE action_type != 'Other'
-              AND story_id IS NOT NULL
-              AND story_title IS NULL
-            GROUP BY story_id, action_type
-            ORDER BY story_id, event_count DESC
+            FROM excluded
+            WHERE exclusion_reason IS NOT NULL
+            GROUP BY exclusion_reason, story_id, action_type
+            ORDER BY exclusion_reason, event_count DESC
         """).df()
 
-        if len(excluded_df) > 0:
-            # Add available metadata columns from events table
-            meta_cols = [c for c in ['story_text', 'story_keys', 'story_deleted_date']
-                         if c in evt_cols]
-            if meta_cols:
-                meta_select = ', '.join(
-                    f'CAST(MAX({c}) AS VARCHAR) as {c}' for c in meta_cols)
-                meta_df = con.execute(f"""
-                    SELECT story_id, {meta_select}
-                    FROM events
-                    WHERE story_id IS NOT NULL AND story_title IS NULL
-                    GROUP BY story_id
-                """).df()
-                excluded_df = excluded_df.merge(meta_df, on='story_id', how='left')
-
-            # Summary sheet: one row per story_id
-            summary_df = con.execute("""
-                SELECT
-                    story_id,
-                    COUNT(*) as total_events,
-                    COUNT(CASE WHEN action_type != 'Other' THEN 1 END) as reportable_events,
-                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
-                    COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
-                    COUNT(CASE WHEN action_type = 'Open Form' THEN 1 END) as open_forms,
-                    COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
-                    COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels,
-                    COUNT(DISTINCT person_hash) as unique_users,
-                    CAST(MIN(timestamp) AS VARCHAR) as first_event,
-                    CAST(MAX(timestamp) AS VARCHAR) as last_event
+        # Enrich detail rows with available metadata per story_id
+        if meta_cols:
+            meta_df = con.execute(f"""
+                SELECT COALESCE(story_id, '(none)') as story_id
+                    {meta_select_prefix}
                 FROM events
-                WHERE story_id IS NOT NULL AND story_title IS NULL
+                WHERE story_id IS NOT NULL
                 GROUP BY story_id
-                ORDER BY total_events DESC
             """).df()
-            if meta_cols:
-                summary_df = summary_df.merge(meta_df, on='story_id', how='left')
+            detail_df = detail_df.merge(meta_df, on='story_id', how='left')
 
-            excluded_xlsx = output_dir / 'excluded_no_story_title.xlsx'
+        # Other labels sheet: show original CP_Link_label values for "Other" events
+        other_labels_df = None
+        if ll_col:
+            other_labels_df = con.execute(f"""
+                SELECT
+                    COALESCE("{ll_col}", '(NULL)') as link_label,
+                    COUNT(*) as event_count,
+                    COUNT(DISTINCT person_hash) as unique_users
+                FROM events
+                WHERE action_type = 'Other'
+                GROUP BY "{ll_col}"
+                ORDER BY event_count DESC
+            """).df()
+
+        if len(summary_df) > 0:
+            excluded_xlsx = output_dir / 'excluded_events.xlsx'
             with pd.ExcelWriter(excluded_xlsx, engine='openpyxl') as writer:
                 summary_df.to_excel(writer, sheet_name='Summary', index=False)
-                excluded_df.to_excel(writer, sheet_name='By Action Type', index=False)
-            log(f"  excluded_no_story_title.xlsx ({len(summary_df)} stories, {excluded_df['event_count'].sum():,} events)")
+                detail_df.to_excel(writer, sheet_name='Detail', index=False)
+                if other_labels_df is not None and len(other_labels_df) > 0:
+                    other_labels_df.to_excel(writer, sheet_name='Other Labels', index=False)
+            total_excluded = summary_df['event_count'].sum()
+            log(f"  excluded_events.xlsx ({total_excluded:,} events across {len(summary_df)} categories)")
     else:
         con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
