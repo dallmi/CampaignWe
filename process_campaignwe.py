@@ -502,7 +502,16 @@ def correct_deleted_dates_from_events(con, story_metadata_path):
         new_date = evt["delete_date"]
 
         # Update if: not yet marked as deleted, or our date is more precise (earlier)
-        if current_status != "deleted" or pd.isna(current_date) or new_date < pd.Timestamp(current_date).date():
+        # Normalize both dates to datetime.date for comparison
+        if hasattr(new_date, 'date'):
+            new_date = new_date.date()
+        if hasattr(current_date, 'date'):
+            current_date_cmp = current_date.date()
+        elif isinstance(current_date, str):
+            current_date_cmp = pd.Timestamp(current_date).date()
+        else:
+            current_date_cmp = current_date
+        if current_status != "deleted" or pd.isna(current_date) or new_date < current_date_cmp:
             meta.loc[mask, "status"] = "deleted"
             meta.loc[mask, "deleted_date"] = new_date
             meta.loc[mask, "deleted_by"] = evt["deleted_by"]
