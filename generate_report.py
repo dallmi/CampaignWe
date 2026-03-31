@@ -16,7 +16,26 @@ Input:
     - output/story_metadata.parquet
 
 Output:
-    - output/campaignwe_report.xlsx (9 tabs)
+    - output/campaignwe_report_YYYY_MM_DD.xlsx (9 tabs)
+
+Tabs:
+    1. Executive Summary  — KPIs: reach, interactions, content, submission funnel
+                            Duration and lifespan count business days only.
+                            Total Clicks excludes Cancel and Other events.
+                            Shows pending/unapproved story count for transparency.
+    2. Weekly Trend        — week-over-week clicks, visitors, reads, likes, submissions
+    3. Story Performance   — per-story reads, likes, like rate, lifespan, median read duration
+                            Includes Author Division and Author Region from SharePoint.
+    4. 3Keys Performance   — engagement by story key (interactions, active visitors)
+    5. Division Interactions — reads+likes aggregated by visitor division
+    6. Region Interactions   — reads+likes aggregated by visitor region
+    7. Hourly & Weekday    — interaction patterns by weekday and hour (CET), heatmap
+    8. Conversion Funnels  — story engagement, submission, and invite funnels
+    9. Read Behaviour      — read duration analysis: KPI overview, duration by follow-up
+                            action, duration distribution, duration x follow-up cross-tab
+   10. Glossary            — metric definitions and context
+
+    Only approved stories (status != 'pending') appear in report data.
 """
 
 import argparse
@@ -1231,13 +1250,16 @@ def build_glossary(wb):
 
     # --- Metrics ---
     heading("Metrics")
-    term("Total Clicks", "All tracked user interactions on the platform (Reads, Likes, Form actions, Invites).")
+    term("Total Clicks", "All tracked user interactions excluding Cancel and Other events (Reads, Likes, Form actions, Invites, Deletes).")
     term("Unique Visitors", "Number of distinct users who performed at least one click.")
     term("Unique Sessions", "Number of distinct browsing sessions (one user can have multiple sessions).")
-    term("Engaged Visitors", "Users who performed at least one Read or Like.")
-    term("Engagements", "Total count of Read and Like actions combined.")
+    term("Active Visitors", "Users who performed at least one Read or Like.")
+    term("Interactions", "Total count of Read and Like actions combined.")
     term("Like Rate", "Likes divided by Reads (or Unique Readers). Shows how often readers appreciate a story.")
-    term("Reads/Day", "Total Reads divided by story lifespan in days. Normalizes for story age.")
+    term("Reads/Day", "Total Reads divided by story lifespan in business days. Normalizes for story age.")
+    term("Duration (business days)", "Calendar days excluding weekends (Saturday and Sunday).")
+    term("Lifespan (days)", "Business days from story creation to deletion (or today if still active).")
+    term("Median Read Duration", "Median time (seconds) between a Read event and the next user action in the same session, capped at 300s.")
     blank()
 
     # --- Action Types ---
@@ -1246,10 +1268,11 @@ def build_glossary(wb):
     term("Like", "User liked a story.")
     term("Open Form", "User opened the story submission form.")
     term("Submit", "User submitted a new story.")
-    term("Cancel", "User closed the submission form without submitting.")
+    term("Cancel", "User closed the submission form without submitting. Excluded from Total Clicks and report output.")
     term("Delete", "User confirmed deletion of a story.")
     term("Open Invite", "User opened the colleague invite dialog.")
     term("Send Invite", "User sent an invitation to colleagues.")
+    term("Other", "Close, edit, pagination, and other non-analytical clicks. Excluded from Total Clicks and report output.")
     blank()
 
     # --- Click Categories ---
@@ -1259,11 +1282,11 @@ def build_glossary(wb):
     term("Submission", "Open Form + Submit + Delete. Represents content creation activity.")
     blank()
 
-    # --- Engagement Definition ---
-    heading("Engagement Definition")
+    # --- Interaction Definition ---
+    heading("Interaction Definition")
     ws.cell(row=r, column=1).font = BODY_FONT
     ws.cell(row=r, column=1, value=(
-        "Throughout this report, 'engagement' is defined as Read + Like actions. "
+        "Throughout this report, 'interaction' is defined as Read + Like actions. "
         "These represent meaningful interaction with story content. Other click types "
         "(form actions, invites) are tracked separately as they represent different user journeys."
     )).alignment = Alignment(wrap_text=True)
@@ -1279,17 +1302,34 @@ def build_glossary(wb):
     term("% of First Step", "Percentage relative to Total Visitors (the funnel entry point).")
     blank()
 
+    # --- Read Behaviour ---
+    heading("Read Behaviour")
+    term("Read Duration", "Time (seconds) between a Read click and the next event in the same session. Capped at 300s (5 min).")
+    term("Follow-up Action", "The action_type of the event immediately following a Read in the same session.")
+    term("(session end)", "No follow-up event exists — the Read was the last action in the session.")
+    term("(unknown)", "A follow-up event exists (duration calculated) but has no action_type classification.")
+    term("Duration x Follow-up", "Cross-tab showing what percentage of reads in each duration bucket lead to each follow-up action.")
+    blank()
+
+    # --- Story Status ---
+    heading("Story Status")
+    term("Active Stories", "Stories currently published and visible on the platform (approved, Status#Id = 1).")
+    term("Deleted Stories", "Stories removed from the platform. Historical data up to the deletion date is preserved.")
+    term("Pending / Unapproved", "Stories in SharePoint that have not been approved (Status#Id != 1). Excluded from all report data.")
+    blank()
+
     # --- Data Notes ---
     heading("Data Notes")
     term("Timezone", "All timestamps and session dates are in Central European Time (CET/CEST).")
-    term("Deleted Stories", "Stories removed from the platform. Historical engagement data up to the deletion date is preserved.")
     term("3Keys", "Up to three category tags assigned to each story. Used to analyze which topics resonate most.")
+    term("Author Division / Region", "Sourced from SharePoint lookup columns on the story list, not from HR data.")
+    term("Excluded Events", "See excluded_events_YYYY_MM_DD.xlsx for a full breakdown of events not counted in Total Clicks.")
 
     # Column widths
     ws.column_dimensions["A"].width = 28
     ws.column_dimensions["B"].width = 80
 
-    log("  Tab 8: Glossary")
+    log("  Tab 9: Glossary")
 
 
 # ---------------------------------------------------------------------------

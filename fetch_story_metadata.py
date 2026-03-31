@@ -2,8 +2,13 @@
 Convert story list CSV (from Power Automate) to Parquet lookup table.
 
 The CSV is automatically synced by a Power Automate flow from a SharePoint list
-into a OneDrive folder. This script reads it, filters active stories (Status#Id = 1),
-and saves story_metadata.parquet with ID, title, and author metadata columns.
+into a OneDrive folder. This script reads it, marks approval status, and saves
+story_metadata.parquet with ID, title, author metadata, and approval columns.
+
+Approval: Stories with Status#Id == 1 are marked as approved. All other stories
+are marked as pending (approved=False, status='pending'). Only approved stories
+are used for event matching in process_campaignwe.py; pending stories are counted
+but excluded from reports.
 
 Soft-delete: Stories that were present in a previous run but are no longer in the
 SharePoint list are marked with a deleted_date (date of disappearance) and kept in
@@ -12,6 +17,13 @@ the output. This preserves historical analytics data up to the deletion date.
 If the main file has no story_title column but does have an Email column,
 the script looks for a separate "Title*.csv" or "Title*.xlsx" file in the
 same folder. It joins on Email to enrich the data with display names/titles.
+
+HR enrichment: If author_email is available and hr_history.parquet exists, the
+script enriches stories with author_country, author_business_sector, author_area,
+and author_unit from the latest HR snapshot.
+
+Author Division and Author Region come directly from SharePoint lookup columns,
+not from the HR enrichment.
 
 Input priority:
   1. OneDrive sync folder: <OneDrive>/Projekte/CampaignWe/input/We Are *.csv

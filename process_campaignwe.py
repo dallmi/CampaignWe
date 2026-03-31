@@ -22,8 +22,9 @@ Input folder: input/
     Overlapping time ranges are handled via upsert on the primary key.
 
 Output:
-    - data/campaignwe.db                (DuckDB database; events table contains person_hash, no plain GPN/email)
-    - output/events_anonymized.parquet  (GPN hashed as person_hash, email dropped; safe for reporting)
+    - data/campaignwe.db                    (DuckDB database; events table contains person_hash, no plain GPN/email)
+    - output/events_anonymized.parquet      (GPN hashed as person_hash, email dropped; safe for reporting)
+    - output/excluded_events_YYYY_MM_DD.xlsx (details of all excluded events for transparency)
 
 PII handling:
     Input files are deleted after successful processing.
@@ -33,6 +34,11 @@ PII handling:
 Primary Key: timestamp + user_id + session_id + name
     On conflict, the latest file's data takes precedence.
 
+Story metadata:
+    Only approved stories (approved=True in story_metadata.parquet) are joined.
+    Pending/unapproved stories are excluded from event matching and reports but
+    their count is shown in the XLSX report for transparency.
+
 Action Type Classification (from CP_Link_label, case-insensitive):
     - Open Form   — "%Share your story%"   (user opened the story submission form)
     - Submit      — "%Submit%"             (user submitted a story)
@@ -40,6 +46,8 @@ Action Type Classification (from CP_Link_label, case-insensitive):
     - Delete      — "^\\d+Yes$"            (user confirmed story deletion, e.g. "56Yes")
     - Read        — "%Read%"               (user opened/expanded a story)
     - Like        — "%like%"               (user liked content)
+    - Send Invite — "%Send Invite%"        (user sent a colleague invitation)
+    - Open Invite — "%Invite your colleagues%" (user opened the invite dialog)
     - Other       — anything else          (excluded from report)
 
     "Other" groups clicks with no analytical value: closing a story after reading
@@ -48,6 +56,18 @@ Action Type Classification (from CP_Link_label, case-insensitive):
 
     "Cancel" events are classified but excluded from the report and parquet output
     as they represent abandoned form submissions with no analytical value.
+
+Exclusion categories (shown in terminal and excluded_events XLSX):
+    - Other:          no analytical value (close, edit, pagination, etc.)
+    - Cancel:         abandoned form submissions
+    - No story title: events for story IDs not found in approved story metadata
+    - Post-delete:    events occurring after a story's deletion date
+    - No story ID:    events without a story ID that are not form/invite actions
+
+Read behaviour columns (computed via LEAD window functions):
+    - read_duration_sec:  seconds until next event in session (capped at 300s)
+    - read_next_action:   action_type of following event, or '(session end)' / '(unknown)'
+    - read_next_story_id: story_id of following event
 """
 
 import sys
