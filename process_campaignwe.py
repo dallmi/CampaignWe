@@ -36,15 +36,18 @@ Primary Key: timestamp + user_id + session_id + name
 Action Type Classification (from CP_Link_label, case-insensitive):
     - Open Form   — "%Share your story%"   (user opened the story submission form)
     - Submit      — "%Submit%"             (user submitted a story)
-    - Cancel      — "%Cancel%"             (user cancelled/closed the submission form)
+    - Cancel      — "%Cancel%"             (user cancelled/closed the submission form; excluded from report)
     - Delete      — "^\\d+Yes$"            (user confirmed story deletion, e.g. "56Yes")
     - Read        — "%Read%"               (user opened/expanded a story)
     - Like        — "%like%"               (user liked content)
-    - Other       — anything else          (excluded from dashboard)
+    - Other       — anything else          (excluded from report)
 
     "Other" groups clicks with no analytical value: closing a story after reading
     (close), editing form fields (edit), browsing/pagination (See more stories,
     pure digit clicks), and events with no label (NULL).
+
+    "Cancel" events are classified but excluded from the report and parquet output
+    as they represent abandoned form submissions with no analytical value.
 """
 
 import sys
@@ -876,9 +879,9 @@ def export_parquet_files(con, output_dir):
     has_deleted_date = 'story_deleted_date' in evt_cols
 
     if has_story_title:
-        # Keep: events with known story metadata OR non-story actions (invite, form, cancel)
+        # Keep: events with known story metadata OR non-story actions (invite, form)
         # For deleted stories: only include events up to the deleted_date
-        # Exclude: "Other" action type and story events without metadata
+        # Exclude: "Other", "Cancel", and story events without metadata
         total_before = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
         deleted_filter = ""
@@ -888,18 +891,18 @@ def export_parquet_files(con, output_dir):
         con.execute(f"""
             COPY (
                 SELECT * FROM events
-                WHERE action_type != 'Other'
+                WHERE action_type NOT IN ('Other', 'Cancel')
                   {deleted_filter}
                   AND (
                     (story_id IS NOT NULL AND story_title IS NOT NULL)
-                    OR action_type IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite', 'Delete')
+                    OR action_type IN ('Open Form', 'Submit', 'Send Invite', 'Open Invite', 'Delete')
                   )
             )
             TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)
         """)
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
         excluded = total_before - row_count
-        log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched + post-delete)")
+        log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + Cancel + unmatched + post-delete)")
 
         # Export all excluded events to XLSX for transparency
         has_deleted = 'story_deleted_date' in evt_cols
