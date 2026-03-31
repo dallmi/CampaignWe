@@ -749,8 +749,8 @@ def build_hourly_weekday(wb, con):
 
     # Part A: Weekday summary
     r = 1
-    write_section_header(ws, r, "WEEKDAY SUMMARY (Engagement: Reads + Likes)", 6); r += 1
-    weekday_headers = ["Weekday", "Engagements", "Engaged Visitors", "Reads", "Likes", "Avg. per Day"]
+    write_section_header(ws, r, "WEEKDAY SUMMARY (Interaction: Reads + Likes)", 6); r += 1
+    weekday_headers = ["Weekday", "Interactions", "Active Visitors", "Reads", "Likes", "Avg. per Day"]
     write_header_row(ws, r, weekday_headers); r += 1
 
     weekday_rows = con.execute(f"""
@@ -772,8 +772,8 @@ def build_hourly_weekday(wb, con):
     r += len(weekday_rows) + 2
 
     # Part B: Hourly summary
-    write_section_header(ws, r, "HOURLY SUMMARY (Engagement, CET)", 4); r += 1
-    hourly_headers = ["Hour (CET)", "Engagements", "Engaged Visitors"]
+    write_section_header(ws, r, "HOURLY SUMMARY (Interaction, CET)", 4); r += 1
+    hourly_headers = ["Hour (CET)", "Interactions", "Active Visitors"]
     write_header_row(ws, r, hourly_headers); r += 1
 
     hourly_rows = con.execute(f"""
@@ -792,7 +792,7 @@ def build_hourly_weekday(wb, con):
     r += len(hourly_rows) + 2
 
     # Part C: Heatmap matrix (weekday x hour)
-    write_section_header(ws, r, "ENGAGEMENT HEATMAP (Reads + Likes by Weekday x Hour CET)", 26); r += 1
+    write_section_header(ws, r, "INTERACTION HEATMAP (Reads + Likes by Weekday x Hour CET)", 26); r += 1
 
     heatmap_headers = [""] + [f"{h:02d}" for h in range(24)]
     write_header_row(ws, r, heatmap_headers); r += 1
