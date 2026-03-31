@@ -461,6 +461,7 @@ def build_story_performance(wb, con):
                 COUNT(CASE WHEN e.action_type = 'Read' THEN 1 END) as total_reads,
                 COUNT(DISTINCT CASE WHEN e.action_type = 'Read' THEN e.person_hash END) as unique_readers,
                 COUNT(CASE WHEN e.action_type = 'Like' THEN 1 END) as likes,
+                MEDIAN(CASE WHEN e.action_type = 'Read' THEN e.read_duration_sec END) as median_read_duration
             FROM events e
             WHERE e.story_id IS NOT NULL
             GROUP BY e.story_id
@@ -481,19 +482,20 @@ def build_story_performance(wb, con):
                 - 2 * DATEDIFF('week', m.created::DATE, COALESCE(m.deleted_date, CURRENT_DATE))
                 - CASE WHEN DAYOFWEEK(m.created::DATE) = 1 THEN 1 ELSE 0 END
                 - CASE WHEN DAYOFWEEK(COALESCE(m.deleted_date, CURRENT_DATE)) = 7 THEN 1 ELSE 0 END
-            ELSE NULL END as lifespan_days
+            ELSE NULL END as lifespan_days,
+            ROUND(se.median_read_duration, 1) as median_read_duration
         FROM story_events se
         LEFT JOIN story_meta m ON se.story_id = m.story_id
         ORDER BY se.total_reads DESC
     """).fetchall()
 
     # Col: A=ID B=Title C=Keys D=AuthDiv E=AuthRegion F=Status G=Created H=Reads
-    #      I=UniqueReaders J=Likes K=LikeRate L=Lifespan M=Reads/Day
+    #      I=UniqueReaders J=Likes K=LikeRate L=Lifespan M=Reads/Day N=MedianReadDur
     headers = [
         "Story ID", "Title", "Keys", "Author Division", "Author Region",
         "Status", "Created",
         "Total Reads", "Unique Readers", "Likes", "Like Rate",
-        "Lifespan (days)", "Reads/Day"
+        "Lifespan (days)", "Reads/Day", "Median Read Duration (s)"
     ]
     fmt = {
         6: NUM_FMT_DATE, 7: NUM_FMT_INT, 8: NUM_FMT_INT, 9: NUM_FMT_INT,
@@ -504,7 +506,7 @@ def build_story_performance(wb, con):
     # Write data without the formula columns (Like Rate=col K, Reads/Day=col M)
     for ri, row_data in enumerate(rows):
         r = ri + 2
-        # Write cols A-J (indices 0-9) and L (index 10=lifespan)
+        # Write cols A-J (indices 0-9)
         data_cells = list(row_data[:10])  # ID through Likes
         fill = ALT_FILL if ri % 2 == 1 else None
         for ci, val in enumerate(data_cells):
@@ -518,7 +520,7 @@ def build_story_performance(wb, con):
                 cell.number_format = NUM_FMT_INT
         # Like Rate formula: =IF(I{r}=0,0,J{r}/I{r})  (Likes/Unique Readers)
         write_formula(ws, r, 11, f"=IF(I{r}=0,0,J{r}/I{r})", fmt=NUM_FMT_PCT, fill=fill)
-        # Lifespan (col L, from SQL)
+        # Lifespan (col L, index 10 in SQL result)
         cell = ws.cell(row=r, column=12, value=row_data[10])
         cell.border = THIN_BORDER
         cell.number_format = NUM_FMT_INT
@@ -526,6 +528,12 @@ def build_story_performance(wb, con):
             cell.fill = fill
         # Reads/Day formula: =IF(L{r}=0,"",H{r}/L{r})  (Total Reads/Lifespan)
         write_formula(ws, r, 13, f'=IF(L{r}=0,"",H{r}/L{r})', fmt=NUM_FMT_RATIO, fill=fill)
+        # Median Read Duration (col N, index 11 in SQL result)
+        cell = ws.cell(row=r, column=14, value=row_data[11])
+        cell.border = THIN_BORDER
+        cell.number_format = NUM_FMT_RATIO
+        if fill:
+            cell.fill = fill
 
     finalize_sheet(ws)
     log("  Tab 3: Story Performance")
