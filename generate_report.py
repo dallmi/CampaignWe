@@ -978,7 +978,7 @@ def build_read_behaviour(wb, con):
 
     action_stats = con.execute("""
         SELECT
-            COALESCE(read_next_action, '(session end)') as action,
+            read_next_action as action,
             COUNT(*) as cnt,
             ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) as pct,
             ROUND(MEDIAN(read_duration_sec), 1) as median_dur,
@@ -1082,7 +1082,7 @@ def build_read_behaviour(wb, con):
 
     # Get the distinct actions for column headers
     actions = con.execute("""
-        SELECT DISTINCT COALESCE(read_next_action, '(session end)') as action
+        SELECT DISTINCT read_next_action as action
         FROM events
         WHERE action_type = 'Read'
         ORDER BY action
@@ -1120,7 +1120,7 @@ def build_read_behaviour(wb, con):
                     WHEN read_duration_sec < 300 THEN 5
                     ELSE 6
                 END as sort_order,
-                COALESCE(read_next_action, '(session end)') as action,
+                read_next_action as action,
                 COUNT(*) as cnt,
                 SUM(COUNT(*)) OVER (PARTITION BY
                     CASE

@@ -791,7 +791,13 @@ def add_calculated_columns(con, has_hr_history=False):
                 )
             END as read_duration_sec,
             CASE WHEN action_type = 'Read' THEN
-                LEAD(action_type) OVER (PARTITION BY session_key ORDER BY timestamp)
+                CASE
+                    WHEN LEAD(timestamp) OVER (PARTITION BY session_key ORDER BY timestamp) IS NULL
+                        THEN '(session end)'
+                    WHEN LEAD(action_type) OVER (PARTITION BY session_key ORDER BY timestamp) IS NULL
+                        THEN '(unknown)'
+                    ELSE LEAD(action_type) OVER (PARTITION BY session_key ORDER BY timestamp)
+                END
             END as read_next_action,
             CASE WHEN action_type = 'Read' THEN
                 LEAD(story_id) OVER (PARTITION BY session_key ORDER BY timestamp)
