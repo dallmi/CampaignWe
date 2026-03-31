@@ -1000,14 +1000,15 @@ def export_parquet_files(con, output_dir):
             """).df()
 
         if len(summary_df) > 0:
-            excluded_xlsx = output_dir / 'excluded_events.xlsx'
+            today = datetime.now().strftime("%Y_%m_%d")
+            excluded_xlsx = output_dir / f'excluded_events_{today}.xlsx'
             with pd.ExcelWriter(excluded_xlsx, engine='openpyxl') as writer:
                 summary_df.to_excel(writer, sheet_name='Summary', index=False)
                 detail_df.to_excel(writer, sheet_name='Detail', index=False)
                 if other_labels_df is not None and len(other_labels_df) > 0:
                     other_labels_df.to_excel(writer, sheet_name='Other Labels', index=False)
             total_excluded = summary_df['event_count'].sum()
-            log(f"  excluded_events.xlsx ({total_excluded:,} events across {len(summary_df)} categories)")
+            log(f"  {excluded_xlsx.name} ({total_excluded:,} events across {len(summary_df)} categories)")
     else:
         con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
