@@ -891,6 +891,65 @@ def export_parquet_files(con, output_dir):
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
         excluded = total_before - row_count
         log(f"  Filtered: {row_count:,} rows kept, {excluded:,} excluded (Other + unmatched + post-delete)")
+
+        # Export excluded story details (non-Other events with story_id but no story_title)
+        excluded_df = con.execute("""
+            SELECT
+                story_id,
+                action_type,
+                COUNT(*) as event_count,
+                COUNT(DISTINCT person_hash) as unique_users,
+                MIN(timestamp) as first_event,
+                MAX(timestamp) as last_event
+            FROM events
+            WHERE action_type != 'Other'
+              AND story_id IS NOT NULL
+              AND story_title IS NULL
+            GROUP BY story_id, action_type
+            ORDER BY story_id, event_count DESC
+        """).df()
+
+        if len(excluded_df) > 0:
+            # Add available metadata columns from events table
+            meta_cols = [c for c in ['story_text', 'story_keys', 'story_deleted_date']
+                         if c in evt_cols]
+            if meta_cols:
+                meta_select = ', '.join(f'MAX({c}) as {c}' for c in meta_cols)
+                meta_df = con.execute(f"""
+                    SELECT story_id, {meta_select}
+                    FROM events
+                    WHERE story_id IS NOT NULL AND story_title IS NULL
+                    GROUP BY story_id
+                """).df()
+                excluded_df = excluded_df.merge(meta_df, on='story_id', how='left')
+
+            # Summary sheet: one row per story_id
+            summary_df = con.execute("""
+                SELECT
+                    story_id,
+                    COUNT(*) as total_events,
+                    COUNT(CASE WHEN action_type != 'Other' THEN 1 END) as reportable_events,
+                    COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
+                    COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
+                    COUNT(CASE WHEN action_type = 'Open Form' THEN 1 END) as open_forms,
+                    COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
+                    COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels,
+                    COUNT(DISTINCT person_hash) as unique_users,
+                    MIN(timestamp) as first_event,
+                    MAX(timestamp) as last_event
+                FROM events
+                WHERE story_id IS NOT NULL AND story_title IS NULL
+                GROUP BY story_id
+                ORDER BY total_events DESC
+            """).df()
+            if meta_cols:
+                summary_df = summary_df.merge(meta_df, on='story_id', how='left')
+
+            excluded_xlsx = output_dir / 'excluded_no_story_title.xlsx'
+            with pd.ExcelWriter(excluded_xlsx, engine='openpyxl') as writer:
+                summary_df.to_excel(writer, sheet_name='Summary', index=False)
+                excluded_df.to_excel(writer, sheet_name='By Action Type', index=False)
+            log(f"  excluded_no_story_title.xlsx ({len(summary_df)} stories, {excluded_df['event_count'].sum():,} events)")
     else:
         con.execute(f"COPY events TO '{anonymized_file}' (FORMAT PARQUET, COMPRESSION SNAPPY)")
         row_count = con.execute(f"SELECT COUNT(*) as n FROM read_parquet('{anonymized_file}')").df()['n'][0]
@@ -1060,6 +1119,19 @@ def print_summary(con, output_dir=None):
         log("  " + "-" * 60)
         for _, row in action_df.iterrows():
             log(f"    {row['action_type']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
+
+        # Show count of non-Other events excluded due to missing story title
+        if 'story_title' in events_cols:
+            no_title_count = con.execute("""
+                SELECT COUNT(*) FROM events
+                WHERE action_type != 'Other'
+                  AND story_id IS NOT NULL
+                  AND story_title IS NULL
+            """).fetchone()[0]
+            if no_title_count > 0:
+                total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+                pct = 100.0 * no_title_count / total if total > 0 else 0
+                log(f"    {'(excluded: no story title)':<35s} {no_title_count:>8,}  ({pct:.1f}%)")
 
         # Show sample "Other" labels for refinement
         other_count = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Other'").fetchone()[0]
