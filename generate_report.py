@@ -470,6 +470,7 @@ def build_story_performance(wb, con):
             COALESCE(m.story_title, '(unknown)') as title,
             COALESCE(m.keys, '') as keys,
             COALESCE(m.author_division, '') as author_division,
+            COALESCE(m.author_region, '') as author_region,
             COALESCE(m.status, 'unknown') as status,
             m.created,
             se.total_reads,
@@ -484,24 +485,25 @@ def build_story_performance(wb, con):
         ORDER BY se.total_reads DESC
     """).fetchall()
 
-    # Col: A=ID B=Title C=Keys D=AuthDiv E=Status F=Created G=Reads H=UniqueReaders
-    #      I=Likes J=LikeRate K=Lifespan L=Reads/Day
+    # Col: A=ID B=Title C=Keys D=AuthDiv E=AuthRegion F=Status G=Created H=Reads
+    #      I=UniqueReaders J=Likes K=LikeRate L=Lifespan M=Reads/Day
     headers = [
-        "Story ID", "Title", "Keys", "Author Division", "Status", "Created",
+        "Story ID", "Title", "Keys", "Author Division", "Author Region",
+        "Status", "Created",
         "Total Reads", "Unique Readers", "Likes", "Like Rate",
         "Lifespan (days)", "Reads/Day"
     ]
     fmt = {
-        5: NUM_FMT_DATE, 6: NUM_FMT_INT, 7: NUM_FMT_INT, 8: NUM_FMT_INT,
-        10: NUM_FMT_INT
+        6: NUM_FMT_DATE, 7: NUM_FMT_INT, 8: NUM_FMT_INT, 9: NUM_FMT_INT,
+        11: NUM_FMT_INT
     }
 
     write_header_row(ws, 1, headers)
-    # Write data without the formula columns (Like Rate=col J, Reads/Day=col L)
+    # Write data without the formula columns (Like Rate=col K, Reads/Day=col M)
     for ri, row_data in enumerate(rows):
         r = ri + 2
-        # Write cols A-I (indices 0-8) and K (index 9=lifespan)
-        data_cells = list(row_data[:9])  # ID through Likes
+        # Write cols A-J (indices 0-9) and L (index 10=lifespan)
+        data_cells = list(row_data[:10])  # ID through Likes
         fill = ALT_FILL if ri % 2 == 1 else None
         for ci, val in enumerate(data_cells):
             cell = ws.cell(row=r, column=ci + 1, value=val)
@@ -512,16 +514,16 @@ def build_story_performance(wb, con):
                 cell.number_format = fmt[ci]
             elif isinstance(val, int):
                 cell.number_format = NUM_FMT_INT
-        # Like Rate formula: =IF(H{r}=0,0,I{r}/H{r})  (Likes/Unique Readers)
-        write_formula(ws, r, 10, f"=IF(H{r}=0,0,I{r}/H{r})", fmt=NUM_FMT_PCT, fill=fill)
-        # Lifespan (col K, from SQL)
-        cell = ws.cell(row=r, column=11, value=row_data[9])
+        # Like Rate formula: =IF(I{r}=0,0,J{r}/I{r})  (Likes/Unique Readers)
+        write_formula(ws, r, 11, f"=IF(I{r}=0,0,J{r}/I{r})", fmt=NUM_FMT_PCT, fill=fill)
+        # Lifespan (col L, from SQL)
+        cell = ws.cell(row=r, column=12, value=row_data[10])
         cell.border = THIN_BORDER
         cell.number_format = NUM_FMT_INT
         if fill:
             cell.fill = fill
-        # Reads/Day formula: =IF(K{r}=0,"",G{r}/K{r})  (Total Reads/Lifespan)
-        write_formula(ws, r, 12, f'=IF(K{r}=0,"",G{r}/K{r})', fmt=NUM_FMT_RATIO, fill=fill)
+        # Reads/Day formula: =IF(L{r}=0,"",H{r}/L{r})  (Total Reads/Lifespan)
+        write_formula(ws, r, 13, f'=IF(L{r}=0,"",H{r}/L{r})', fmt=NUM_FMT_RATIO, fill=fill)
 
     finalize_sheet(ws)
     log("  Tab 3: Story Performance")
