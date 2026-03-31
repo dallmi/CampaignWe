@@ -16,7 +16,7 @@ Input:
     - output/story_metadata.parquet
 
 Output:
-    - output/campaignwe_report.xlsx (8 tabs)
+    - output/campaignwe_report.xlsx (9 tabs)
 """
 
 import argparse
@@ -920,8 +920,189 @@ def build_conversion_funnel(wb, con):
     log("  Tab 7: Conversion Funnels")
 
 
+def build_read_behaviour(wb, con):
+    """Tab 8: Read Behaviour — read duration and follow-up action analysis."""
+    ws = wb.create_sheet("Read Behaviour")
+    ws.sheet_properties.tabColor = GRAY_IV
+
+    # Check if read_duration_sec column exists
+    evt_cols = [r[0] for r in con.execute("DESCRIBE events").fetchall()]
+    if 'read_duration_sec' not in evt_cols:
+        ws.cell(row=1, column=1, value="No read behaviour data available (read_duration_sec missing)")
+        log("  Tab 8: Read Behaviour (skipped — no data)")
+        return
+
+    # Query raw read events
+    has_title = 'story_title' in evt_cols
+    title_select = "COALESCE(story_title, '') as story_title," if has_title else "'' as story_title,"
+    rows = con.execute(f"""
+        SELECT
+            COALESCE(story_id, '') as story_id,
+            {title_select}
+            read_duration_sec,
+            COALESCE(read_next_action, '(session end)') as read_next_action,
+            COALESCE(read_next_story_id, '') as read_next_story_id,
+            CAST(timestamp_cet AS VARCHAR) as timestamp_cet
+        FROM events
+        WHERE action_type = 'Read'
+        ORDER BY timestamp_cet
+    """).fetchall()
+
+    if not rows:
+        ws.cell(row=1, column=1, value="No read events found")
+        log("  Tab 8: Read Behaviour (skipped — no reads)")
+        return
+
+    # --- Section 1: KPI block ---
+    r = 1
+    write_section_header(ws, r, "READ BEHAVIOUR OVERVIEW", 7); r += 1
+
+    # KPI labels (values are formulas referencing the raw data below)
+    data_start = r + 7  # header row + 1
+    data_end = data_start + len(rows) - 1
+    col_dur = "C"  # Read Duration column
+
+    ws.cell(row=r, column=1, value="Median Read Duration (s)").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=MEDIAN({col_dur}{data_start}:{col_dur}{data_end})", fmt=NUM_FMT_RATIO); r += 1
+
+    ws.cell(row=r, column=1, value="Avg Read Duration (s)").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=AVERAGE({col_dur}{data_start}:{col_dur}{data_end})", fmt=NUM_FMT_RATIO); r += 1
+
+    ws.cell(row=r, column=1, value="Reads with Duration").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=COUNTA({col_dur}{data_start}:{col_dur}{data_end})", fmt=NUM_FMT_INT); r += 1
+
+    ws.cell(row=r, column=1, value="Reads without Duration (session end)").font = Font(bold=True, color=GRAY_VI)
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    ws.cell(row=r, column=1).alignment = Alignment(indent=1)
+    write_formula(ws, r, 2, f"=ROWS(A{data_start}:A{data_end})-COUNTA({col_dur}{data_start}:{col_dur}{data_end})", fmt=NUM_FMT_INT); r += 1
+
+    r += 1  # blank row
+
+    # --- Raw data table ---
+    write_section_header(ws, r, "READ EVENT DETAILS", 7); r += 1
+    headers = [
+        "Story ID", "Story Title", "Read Duration (s)",
+        "Follow-up Action", "Follow-up Story ID", "Same Story?", "Timestamp"
+    ]
+    write_header_row(ws, r, headers); r += 1
+    assert r == data_start, f"data_start mismatch: expected {data_start}, got {r}"
+
+    fmt_map = {2: NUM_FMT_RATIO}
+    write_data_rows(ws, r, rows, fmt_map=fmt_map)
+
+    # Add "Same Story?" formula in column F for each row
+    for ri in range(len(rows)):
+        dr = data_start + ri
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, dr, 6, f'=IF(OR(A{dr}="",E{dr}=""),"",IF(A{dr}=E{dr},"Yes","No"))', fill=fill)
+
+    r = data_end + 2  # gap after raw data
+
+    # --- Section 2: Duration by Follow-up Action ---
+    write_section_header(ws, r, "DURATION BY FOLLOW-UP ACTION", 5); r += 1
+    s2_headers = ["Follow-up Action", "Count", "% of Reads", "Median Duration (s)", "Avg Duration (s)"]
+    write_header_row(ws, r, s2_headers); r += 1
+
+    # Get distinct follow-up actions and their medians (Excel has no MEDIANIFS)
+    action_stats = con.execute("""
+        SELECT
+            COALESCE(read_next_action, '(session end)') as action,
+            MEDIAN(read_duration_sec) as median_dur
+        FROM events
+        WHERE action_type = 'Read'
+        GROUP BY 1
+        ORDER BY COUNT(*) DESC
+    """).fetchall()
+
+    col_action = "D"  # Follow-up Action column in raw data
+    for ai, (action, median_dur) in enumerate(action_stats):
+        fill = ALT_FILL if ai % 2 == 1 else None
+        # A: action label
+        cell = ws.cell(row=r, column=1, value=action)
+        cell.border = THIN_BORDER
+        if fill:
+            cell.fill = fill
+        # B: Count (COUNTIFS)
+        if action == '(session end)':
+            write_formula(ws, r, 2,
+                f'=ROWS(A{data_start}:A{data_end})-COUNTA({col_dur}{data_start}:{col_dur}{data_end})',
+                fmt=NUM_FMT_INT, fill=fill)
+        else:
+            write_formula(ws, r, 2,
+                f'=COUNTIFS({col_action}${data_start}:{col_action}${data_end},A{r})',
+                fmt=NUM_FMT_INT, fill=fill)
+        # C: % of Reads
+        write_formula(ws, r, 3,
+            f'=IF(ROWS(A${data_start}:A${data_end})=0,0,B{r}/ROWS(A${data_start}:A${data_end}))',
+            fmt=NUM_FMT_PCT, fill=fill)
+        # D: Median Duration (static from DuckDB — no MEDIANIFS in Excel)
+        cell = ws.cell(row=r, column=4, value=round(median_dur, 1) if median_dur is not None else None)
+        cell.border = THIN_BORDER
+        cell.number_format = NUM_FMT_RATIO
+        if fill:
+            cell.fill = fill
+        # E: Avg Duration (AVERAGEIFS)
+        if action == '(session end)':
+            cell = ws.cell(row=r, column=5, value=None)
+            cell.border = THIN_BORDER
+            if fill:
+                cell.fill = fill
+        else:
+            write_formula(ws, r, 5,
+                f'=IFERROR(AVERAGEIFS({col_dur}${data_start}:{col_dur}${data_end},{col_action}${data_start}:{col_action}${data_end},A{r}),"")',
+                fmt=NUM_FMT_RATIO, fill=fill)
+        r += 1
+
+    r += 1  # gap
+
+    # --- Section 3: Duration Distribution ---
+    write_section_header(ws, r, "DURATION DISTRIBUTION", 3); r += 1
+    s3_headers = ["Bucket", "Count", "% of Reads"]
+    write_header_row(ws, r, s3_headers); r += 1
+
+    buckets = [
+        ("< 5s",        f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},"<5")'),
+        ("5 - 15s",     f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},">=5",{col_dur}${data_start}:{col_dur}${data_end},"<15")'),
+        ("15 - 30s",    f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},">=15",{col_dur}${data_start}:{col_dur}${data_end},"<30")'),
+        ("30 - 60s",    f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},">=30",{col_dur}${data_start}:{col_dur}${data_end},"<60")'),
+        ("1 - 5 min",   f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},">=60",{col_dur}${data_start}:{col_dur}${data_end},"<300")'),
+        ("> 5 min (capped)", f'=COUNTIFS({col_dur}${data_start}:{col_dur}${data_end},">=300")'),
+        ("Unknown (session end)", f'=ROWS(A${data_start}:A${data_end})-COUNTA({col_dur}${data_start}:{col_dur}${data_end})'),
+    ]
+
+    for bi, (label, count_formula) in enumerate(buckets):
+        fill = ALT_FILL if bi % 2 == 1 else None
+        cell = ws.cell(row=r, column=1, value=label)
+        cell.border = THIN_BORDER
+        if fill:
+            cell.fill = fill
+        write_formula(ws, r, 2, count_formula, fmt=NUM_FMT_INT, fill=fill)
+        write_formula(ws, r, 3,
+            f'=IF(ROWS(A${data_start}:A${data_end})=0,0,B{r}/ROWS(A${data_start}:A${data_end}))',
+            fmt=NUM_FMT_PCT, fill=fill)
+        r += 1
+
+    # Column widths
+    ws.column_dimensions["A"].width = 22
+    ws.column_dimensions["B"].width = 22
+    ws.column_dimensions["C"].width = 18
+    ws.column_dimensions["D"].width = 22
+    ws.column_dimensions["E"].width = 20
+    ws.column_dimensions["F"].width = 14
+    ws.column_dimensions["G"].width = 22
+
+    finalize_sheet(ws)
+    log("  Tab 8: Read Behaviour")
+
+
 def build_glossary(wb):
-    """Tab 8: Glossary — metric definitions and context for report readers."""
+    """Tab 9: Glossary — metric definitions and context for report readers."""
     ws = wb.create_sheet("Glossary")
     ws.sheet_properties.tabColor = GRAY_IV
     ws.sheet_view.showGridLines = False
@@ -1058,6 +1239,7 @@ def main():
     build_region_engagement(wb, con, cols)
     build_hourly_weekday(wb, con)
     build_conversion_funnel(wb, con)
+    build_read_behaviour(wb, con)
     build_glossary(wb)
 
     log()

@@ -741,7 +741,11 @@ def add_calculated_columns(con, has_hr_history=False):
             NULL::TIMESTAMP as prev_timestamp,
             NULL::BIGINT as ms_since_prev_event,
             NULL::DOUBLE as sec_since_prev_event,
-            NULL::VARCHAR as time_since_prev_bucket
+            NULL::VARCHAR as time_since_prev_bucket,
+            -- Read behaviour (populated via LEAD window functions in next step)
+            NULL::DOUBLE as read_duration_sec,
+            NULL::VARCHAR as read_next_action,
+            NULL::VARCHAR as read_next_story_id
             {hr_select}
         FROM events_raw r
         {hr_join_sql}
@@ -752,7 +756,7 @@ def add_calculated_columns(con, has_hr_history=False):
     con.execute("""
         CREATE OR REPLACE TABLE events AS
         SELECT
-            e.* EXCLUDE (event_order, prev_event, prev_timestamp, ms_since_prev_event, sec_since_prev_event, time_since_prev_bucket),
+            e.* EXCLUDE (event_order, prev_event, prev_timestamp, ms_since_prev_event, sec_since_prev_event, time_since_prev_bucket, read_duration_sec, read_next_action, read_next_story_id),
             ROW_NUMBER() OVER (PARTITION BY session_key ORDER BY timestamp) as event_order,
             LAG(name) OVER (PARTITION BY session_key ORDER BY timestamp) as prev_event,
             LAG(timestamp) OVER (PARTITION BY session_key ORDER BY timestamp) as prev_timestamp,
@@ -776,7 +780,22 @@ def add_calculated_columns(con, has_hr_history=False):
                 WHEN DATEDIFF('millisecond', LAG(timestamp) OVER (PARTITION BY session_key ORDER BY timestamp), timestamp) < 30000 THEN '10-30s'
                 WHEN DATEDIFF('millisecond', LAG(timestamp) OVER (PARTITION BY session_key ORDER BY timestamp), timestamp) < 60000 THEN '30-60s'
                 ELSE '> 60s'
-            END as time_since_prev_bucket
+            END as time_since_prev_bucket,
+            -- Read behaviour: duration until next event and what follows
+            CASE WHEN action_type = 'Read' THEN
+                LEAST(
+                    ROUND(DATEDIFF('millisecond', timestamp,
+                        LEAD(timestamp) OVER (PARTITION BY session_key ORDER BY timestamp)
+                    ) / 1000.0, 3),
+                    300.0
+                )
+            END as read_duration_sec,
+            CASE WHEN action_type = 'Read' THEN
+                LEAD(action_type) OVER (PARTITION BY session_key ORDER BY timestamp)
+            END as read_next_action,
+            CASE WHEN action_type = 'Read' THEN
+                LEAD(story_id) OVER (PARTITION BY session_key ORDER BY timestamp)
+            END as read_next_story_id
         FROM events e
     """)
 
