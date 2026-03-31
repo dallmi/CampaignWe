@@ -1130,18 +1130,55 @@ def print_summary(con, output_dir=None):
         for _, row in action_df.iterrows():
             log(f"    {row['action_type']:<35s} {int(row['cnt']):>8,}  ({row['pct']:.1f}%)")
 
-        # Show count of non-Other events excluded due to missing story title
+        # Show exclusion breakdown so terminal totals reconcile with report
         if 'story_title' in events_cols:
+            total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+
             no_title_count = con.execute("""
                 SELECT COUNT(*) FROM events
                 WHERE action_type != 'Other'
                   AND story_id IS NOT NULL
                   AND story_title IS NULL
             """).fetchone()[0]
+
+            post_delete_count = 0
+            no_story_id_count = 0
+            if 'story_deleted_date' in events_cols:
+                post_delete_count = con.execute("""
+                    SELECT COUNT(*) FROM events
+                    WHERE action_type != 'Other'
+                      AND story_id IS NOT NULL
+                      AND story_title IS NOT NULL
+                      AND story_deleted_date IS NOT NULL
+                      AND CAST(timestamp AS DATE) > story_deleted_date
+                """).fetchone()[0]
+
+            no_story_id_count = con.execute("""
+                SELECT COUNT(*) FROM events
+                WHERE action_type != 'Other'
+                  AND story_id IS NULL
+                  AND action_type NOT IN ('Open Form', 'Submit', 'Cancel', 'Send Invite', 'Open Invite', 'Delete')
+            """).fetchone()[0]
+
+            other_count_for_summary = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Other'").fetchone()[0]
+            total_excluded = other_count_for_summary + no_title_count + post_delete_count + no_story_id_count
+            reported = total - total_excluded
+
+            log("\n  EXCLUSION BREAKDOWN")
+            log("  " + "-" * 60)
             if no_title_count > 0:
-                total = con.execute("SELECT COUNT(*) FROM events").fetchone()[0]
-                pct = 100.0 * no_title_count / total if total > 0 else 0
-                log(f"    {'(excluded: no story title)':<35s} {no_title_count:>8,}  ({pct:.1f}%)")
+                pct = 100.0 * no_title_count / total
+                log(f"    {'No story title':<35s} {no_title_count:>8,}  ({pct:.1f}%)")
+            if post_delete_count > 0:
+                pct = 100.0 * post_delete_count / total
+                log(f"    {'Post-delete':<35s} {post_delete_count:>8,}  ({pct:.1f}%)")
+            if no_story_id_count > 0:
+                pct = 100.0 * no_story_id_count / total
+                log(f"    {'No story ID':<35s} {no_story_id_count:>8,}  ({pct:.1f}%)")
+            log(f"    {'Other':<35s} {other_count_for_summary:>8,}  ({100.0 * other_count_for_summary / total:.1f}%)")
+            log("  " + "-" * 60)
+            log(f"    {'Total excluded':<35s} {total_excluded:>8,}")
+            log(f"    {'Reported clicks':<35s} {reported:>8,}  (= {total:,} - {total_excluded:,})")
 
         # Show sample "Other" labels for refinement
         other_count = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Other'").fetchone()[0]
