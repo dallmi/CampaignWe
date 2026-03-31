@@ -899,8 +899,8 @@ def export_parquet_files(con, output_dir):
                 action_type,
                 COUNT(*) as event_count,
                 COUNT(DISTINCT person_hash) as unique_users,
-                MIN(timestamp) as first_event,
-                MAX(timestamp) as last_event
+                CAST(MIN(timestamp) AS VARCHAR) as first_event,
+                CAST(MAX(timestamp) AS VARCHAR) as last_event
             FROM events
             WHERE action_type != 'Other'
               AND story_id IS NOT NULL
@@ -935,8 +935,8 @@ def export_parquet_files(con, output_dir):
                     COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
                     COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels,
                     COUNT(DISTINCT person_hash) as unique_users,
-                    MIN(timestamp) as first_event,
-                    MAX(timestamp) as last_event
+                    CAST(MIN(timestamp) AS VARCHAR) as first_event,
+                    CAST(MAX(timestamp) AS VARCHAR) as last_event
                 FROM events
                 WHERE story_id IS NOT NULL AND story_title IS NULL
                 GROUP BY story_id
