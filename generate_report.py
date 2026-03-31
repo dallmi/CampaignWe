@@ -403,8 +403,8 @@ def build_weekly_trend(wb, con):
             w.likes,
             w.submits,
             w.open_forms,
-            w.invites_sent,
             w.invites_opened,
+            w.invites_sent,
             w.deletes
         FROM weekly w
         LEFT JOIN new_per_week n ON w.yw = n.yw
@@ -412,12 +412,12 @@ def build_weekly_trend(wb, con):
     """).fetchall()
 
     # Col: A=Week B=Start C=Clicks D=UV E=New F=Return G=Reads H=Likes
-    #      I=Submit J=OpenForm K=InvSent L=InvOpen M=Deletes N=LikeRate
+    #      I=Submit J=OpenForm K=InvOpen L=InvSent M=Deletes N=LikeRate
     headers = [
         "Week", "Week Start", "Clicks", "Unique Visitors",
         "New Visitors", "Returning Visitors", "Reads", "Likes",
-        "Submissions", "Open Form", "Invites Sent",
-        "Invites Opened", "Deletes", "Like Rate"
+        "Submissions", "Open Form", "Invites Opened",
+        "Invites Sent", "Deletes", "Like Rate"
     ]
     fmt = {
         0: "0", 1: NUM_FMT_DATE, 2: NUM_FMT_INT, 3: NUM_FMT_INT,
