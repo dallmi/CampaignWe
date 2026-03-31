@@ -909,20 +909,22 @@ def export_parquet_files(con, output_dir):
         reason_case = """
             CASE
                 WHEN action_type = 'Other' THEN 'Other'
+                WHEN action_type = 'Cancel' THEN 'Cancel'
                 WHEN story_id IS NOT NULL AND story_title IS NULL THEN 'No story title'
                 WHEN story_deleted_date IS NOT NULL
                      AND CAST(timestamp AS DATE) > story_deleted_date THEN 'Post-delete'
                 WHEN story_id IS NULL
-                     AND action_type NOT IN ('Open Form','Submit','Cancel','Send Invite','Open Invite','Delete')
+                     AND action_type NOT IN ('Open Form','Submit','Send Invite','Open Invite','Delete')
                      THEN 'No story ID'
                 ELSE NULL
             END
         """ if has_deleted else """
             CASE
                 WHEN action_type = 'Other' THEN 'Other'
+                WHEN action_type = 'Cancel' THEN 'Cancel'
                 WHEN story_id IS NOT NULL AND story_title IS NULL THEN 'No story title'
                 WHEN story_id IS NULL
-                     AND action_type NOT IN ('Open Form','Submit','Cancel','Send Invite','Open Invite','Delete')
+                     AND action_type NOT IN ('Open Form','Submit','Send Invite','Open Invite','Delete')
                      THEN 'No story ID'
                 ELSE NULL
             END
@@ -1210,10 +1212,11 @@ def print_summary(con, output_dir=None):
             """).fetchone()[0]
 
             other_count_for_summary = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Other'").fetchone()[0]
-            total_excluded = other_count_for_summary + no_title_count + post_delete_count + no_story_id_count
+            cancel_count = con.execute("SELECT COUNT(*) FROM events WHERE action_type = 'Cancel'").fetchone()[0]
+            total_excluded = other_count_for_summary + no_title_count + post_delete_count + no_story_id_count + cancel_count
             reported = total - total_excluded
 
-            log("\n  EXCLUSION BREAKDOWN")
+            log("\n  EXCLUSION BREAKDOWN (not counted as Total Clicks in report)")
             log("  " + "-" * 60)
             if no_title_count > 0:
                 pct = 100.0 * no_title_count / total
@@ -1224,6 +1227,9 @@ def print_summary(con, output_dir=None):
             if no_story_id_count > 0:
                 pct = 100.0 * no_story_id_count / total
                 log(f"    {'No story ID':<35s} {no_story_id_count:>8,}  ({pct:.1f}%)")
+            if cancel_count > 0:
+                pct = 100.0 * cancel_count / total
+                log(f"    {'Cancel':<35s} {cancel_count:>8,}  ({pct:.1f}%)")
             log(f"    {'Other':<35s} {other_count_for_summary:>8,}  ({100.0 * other_count_for_summary / total:.1f}%)")
             log("  " + "-" * 60)
             log(f"    {'Total excluded':<35s} {total_excluded:>8,}")

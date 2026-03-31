@@ -240,7 +240,7 @@ def build_executive_summary(wb, con, cols):
               - CASE WHEN DAYOFWEEK(MIN(session_date)) = 1 THEN 1 ELSE 0 END
               - CASE WHEN DAYOFWEEK(MAX(session_date)) = 7 THEN 1 ELSE 0 END
               as duration_days,
-            COUNT(*) as total_interactions,
+            COUNT(CASE WHEN action_type != 'Cancel' THEN 1 END) as total_interactions,
             COUNT(DISTINCT person_hash) as unique_visitors,
             COUNT(DISTINCT session_key) as unique_sessions,
             COUNT(DISTINCT CASE WHEN story_id IS NOT NULL THEN story_id END) as total_stories,
@@ -369,13 +369,12 @@ def build_weekly_trend(wb, con):
             SELECT
                 YEARWEEK(session_date) as yw,
                 MIN(session_date) as week_start,
-                COUNT(*) as clicks,
+                COUNT(CASE WHEN action_type != 'Cancel' THEN 1 END) as clicks,
                 COUNT(DISTINCT person_hash) as uv,
                 COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
                 COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes,
                 COUNT(CASE WHEN action_type = 'Submit' THEN 1 END) as submits,
                 COUNT(CASE WHEN action_type = 'Open Form' THEN 1 END) as open_forms,
-                COUNT(CASE WHEN action_type = 'Cancel' THEN 1 END) as cancels,
                 COUNT(CASE WHEN action_type = 'Send Invite' THEN 1 END) as invites_sent,
                 COUNT(CASE WHEN action_type = 'Open Invite' THEN 1 END) as invites_opened,
                 COUNT(CASE WHEN action_type = 'Delete' THEN 1 END) as deletes,
@@ -404,7 +403,6 @@ def build_weekly_trend(wb, con):
             w.likes,
             w.submits,
             w.open_forms,
-            w.cancels,
             w.invites_sent,
             w.invites_opened,
             w.deletes
@@ -414,18 +412,18 @@ def build_weekly_trend(wb, con):
     """).fetchall()
 
     # Col: A=Week B=Start C=Clicks D=UV E=New F=Return G=Reads H=Likes
-    #      I=Submit J=OpenForm K=Cancel L=InvSent M=InvOpen N=Deletes O=LikeRate
+    #      I=Submit J=OpenForm K=InvSent L=InvOpen M=Deletes N=LikeRate
     headers = [
         "Week", "Week Start", "Clicks", "Unique Visitors",
         "New Visitors", "Returning Visitors", "Reads", "Likes",
-        "Submissions", "Open Form", "Cancel", "Invites Sent",
+        "Submissions", "Open Form", "Invites Sent",
         "Invites Opened", "Deletes", "Like Rate"
     ]
     fmt = {
         0: "0", 1: NUM_FMT_DATE, 2: NUM_FMT_INT, 3: NUM_FMT_INT,
         4: NUM_FMT_INT, 5: NUM_FMT_INT, 6: NUM_FMT_INT, 7: NUM_FMT_INT,
         8: NUM_FMT_INT, 9: NUM_FMT_INT, 10: NUM_FMT_INT, 11: NUM_FMT_INT,
-        12: NUM_FMT_INT, 13: NUM_FMT_INT
+        12: NUM_FMT_INT
     }
 
     write_header_row(ws, 1, headers)
@@ -434,7 +432,7 @@ def build_weekly_trend(wb, con):
     # Like Rate as formula: =IF(G{r}=0,0,H{r}/G{r})  (Likes/Reads)
     for ri in range(len(rows)):
         r = ri + 2
-        write_formula(ws, r, 15, f"=IF(G{r}=0,0,H{r}/G{r})", fmt=NUM_FMT_PCT,
+        write_formula(ws, r, 14, f"=IF(G{r}=0,0,H{r}/G{r})", fmt=NUM_FMT_PCT,
                       fill=ALT_FILL if ri % 2 == 1 else None)
 
     # Data bars on Clicks and UV columns
@@ -979,7 +977,7 @@ def build_glossary(wb):
     heading("Click Categories (Executive Summary)")
     term("Engagement", "Read + Like. Represents genuine story consumption and appreciation.")
     term("Invite", "Open Invite + Send Invite. Represents viral/sharing behavior.")
-    term("Submission", "Open Form + Submit + Cancel + Delete. Represents content creation activity.")
+    term("Submission", "Open Form + Submit + Delete. Represents content creation activity.")
     blank()
 
     # --- Engagement Definition ---
