@@ -235,7 +235,11 @@ def build_executive_summary(wb, con, cols):
         SELECT
             MIN(session_date) as first_date,
             MAX(session_date) as last_date,
-            DATEDIFF('day', MIN(session_date), MAX(session_date)) + 1 as duration_days,
+            DATEDIFF('day', MIN(session_date), MAX(session_date)) + 1
+              - 2 * (DATEDIFF('week', MIN(session_date), MAX(session_date)))
+              - CASE WHEN DAYOFWEEK(MIN(session_date)) = 1 THEN 1 ELSE 0 END
+              - CASE WHEN DAYOFWEEK(MAX(session_date)) = 7 THEN 1 ELSE 0 END
+              as duration_days,
             COUNT(*) as total_interactions,
             COUNT(DISTINCT person_hash) as unique_visitors,
             COUNT(DISTINCT session_key) as unique_sessions,
@@ -265,13 +269,13 @@ def build_executive_summary(wb, con, cols):
     # Aggregate click categories
     engagement_clicks = reads + likes
     invite_clicks = invites_sent + invites_opened
-    submission_clicks = open_forms + submits + cancels + deletes
+    submission_clicks = open_forms + submits + deletes
 
     # --- Layout --- (track row numbers for formula references)
     r = 1
     write_section_header(ws, r, "CAMPAIGN OVERVIEW", 2); r += 1
     write_kpi_row(ws, r, "Report Period", f"{first_date} to {last_date}"); r += 1
-    write_kpi_row(ws, r, "Duration (days)", duration, fmt=NUM_FMT_INT); row_dur = r; r += 1
+    write_kpi_row(ws, r, "Duration (business days)", duration, fmt=NUM_FMT_INT); row_dur = r; r += 1
     r += 1
 
     write_section_header(ws, r, "REACH", 2); r += 1
@@ -281,7 +285,7 @@ def build_executive_summary(wb, con, cols):
     breakdown = [
         (r, "Engagement (Read + Like)", engagement_clicks),
         (r + 1, "Invite (Open + Send)", invite_clicks),
-        (r + 2, "Submission (Form + Submit + Cancel + Delete)", submission_clicks),
+        (r + 2, "Submission (Form + Submit + Delete)", submission_clicks),
     ]
     for br_row, label, count in breakdown:
         # Column A: formula that concatenates the % with the label
@@ -311,7 +315,7 @@ def build_executive_summary(wb, con, cols):
     write_formula(ws, r, 2, f"=IF(B{row_dur}=0,0,B{row_uv}/B{row_dur})", fmt=NUM_FMT_RATIO); r += 1
     r += 1
 
-    write_section_header(ws, r, "ENGAGEMENT", 2); r += 1
+    write_section_header(ws, r, "INTERACTION", 2); r += 1
     write_kpi_row(ws, r, "Story Reads", reads, fmt=NUM_FMT_INT); row_reads = r; r += 1
     write_kpi_row(ws, r, "Story Likes", likes, fmt=NUM_FMT_INT); row_likes = r; r += 1
     # Formula: Likes / Reads
@@ -319,8 +323,8 @@ def build_executive_summary(wb, con, cols):
     ws.cell(row=r, column=1).border = THIN_BORDER
     ws.cell(row=r, column=1).alignment = Alignment(indent=1)
     write_formula(ws, r, 2, f"=IF(B{row_reads}=0,0,B{row_likes}/B{row_reads})", fmt=NUM_FMT_PCT); r += 1
-    write_kpi_row(ws, r, "Invites Sent", invites_sent, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Invites Opened", invites_opened, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Invites Sent", invites_sent, fmt=NUM_FMT_INT); r += 1
     r += 1
 
     write_section_header(ws, r, "CONTENT", 2); r += 1
@@ -347,7 +351,6 @@ def build_executive_summary(wb, con, cols):
     ws.cell(row=r, column=1).border = THIN_BORDER
     ws.cell(row=r, column=1).alignment = Alignment(indent=1)
     write_formula(ws, r, 2, f"=IF(B{row_openform}=0,0,B{row_submit}/B{row_openform})", fmt=NUM_FMT_PCT); r += 1
-    write_kpi_row(ws, r, "Cancelled", cancels, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Delete Confirmations (Clicks)", deletes, fmt=NUM_FMT_INT); r += 1
 
     ws.column_dimensions["A"].width = 38
