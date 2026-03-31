@@ -914,7 +914,8 @@ def export_parquet_files(con, output_dir):
             meta_cols = [c for c in ['story_text', 'story_keys', 'story_deleted_date']
                          if c in evt_cols]
             if meta_cols:
-                meta_select = ', '.join(f'MAX({c}) as {c}' for c in meta_cols)
+                meta_select = ', '.join(
+                    f'CAST(MAX({c}) AS VARCHAR) as {c}' for c in meta_cols)
                 meta_df = con.execute(f"""
                     SELECT story_id, {meta_select}
                     FROM events
