@@ -476,10 +476,12 @@ def build_story_performance(wb, con):
             se.total_reads,
             se.unique_readers,
             se.likes,
-            CASE WHEN m.created IS NOT NULL
-                THEN DATEDIFF('day', m.created::DATE,
-                    COALESCE(m.deleted_date, CURRENT_DATE)) + 1
-                ELSE NULL END as lifespan_days
+            CASE WHEN m.created IS NOT NULL THEN
+                DATEDIFF('day', m.created::DATE, COALESCE(m.deleted_date, CURRENT_DATE)) + 1
+                - 2 * DATEDIFF('week', m.created::DATE, COALESCE(m.deleted_date, CURRENT_DATE))
+                - CASE WHEN DAYOFWEEK(m.created::DATE) = 1 THEN 1 ELSE 0 END
+                - CASE WHEN DAYOFWEEK(COALESCE(m.deleted_date, CURRENT_DATE)) = 7 THEN 1 ELSE 0 END
+            ELSE NULL END as lifespan_days
         FROM story_events se
         LEFT JOIN story_meta m ON se.story_id = m.story_id
         ORDER BY se.total_reads DESC
