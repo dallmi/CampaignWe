@@ -423,6 +423,7 @@ def load_story_titles(con, story_titles_path):
     con.execute(f"""
         CREATE TABLE story_titles AS
         SELECT * FROM read_parquet('{story_titles_path}')
+        WHERE COALESCE(approved, TRUE) = TRUE
     """)
 
     # Ensure story_id is VARCHAR to match events.story_id (extracted via regex)
@@ -432,7 +433,10 @@ def load_story_titles(con, story_titles_path):
         con.execute("ALTER TABLE story_titles ALTER story_id TYPE VARCHAR")
 
     row_count = con.execute("SELECT COUNT(*) FROM story_titles").fetchone()[0]
-    log(f"  Loaded story_titles: {row_count} stories")
+    total_in_file = con.execute(f"SELECT COUNT(*) FROM read_parquet('{story_titles_path}')").fetchone()[0]
+    pending = total_in_file - row_count
+    log(f"  Loaded story_titles: {row_count} approved stories" +
+        (f" ({pending} pending/unapproved excluded)" if pending > 0 else ""))
 
     # Diagnostic: show story_id values for debugging joins
     sample = con.execute("""

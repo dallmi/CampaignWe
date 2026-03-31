@@ -385,14 +385,16 @@ def main():
         if col_name in result.columns:
             result[col_name] = result[col_name].apply(parse_sp_lookup)
 
-    # Filter by status (only active stories)
+    # Mark approval status (status_id == 1 = approved, anything else = pending)
     if FILTER_COLUMN in result.columns:
-        before = len(result)
         result[FILTER_COLUMN] = pd.to_numeric(result[FILTER_COLUMN], errors="coerce")
-        result = result[result[FILTER_COLUMN] == FILTER_VALUE]
-        print(f"  Filtered {FILTER_COLUMN} == {FILTER_VALUE}: {before} -> {len(result)} rows")
+        approved = (result[FILTER_COLUMN] == FILTER_VALUE).sum()
+        pending = len(result) - approved
+        result["approved"] = (result[FILTER_COLUMN] == FILTER_VALUE)
+        print(f"  Approval status: {approved} approved, {pending} pending/unapproved")
     else:
-        print(f"  Warning: filter column '{FILTER_COLUMN}' not available, skipping filter")
+        result["approved"] = True
+        print(f"  Warning: filter column '{FILTER_COLUMN}' not available, marking all as approved")
 
     # Split comma-separated keys into story_key1, story_key2, story_key3
     if "keys" in result.columns:
@@ -413,8 +415,8 @@ def main():
 
     print(f"  Mapped {len(result)} stories")
 
-    # Add status column for active stories
-    result["status"] = "active"
+    # Add status column — only approved stories are "active"
+    result["status"] = result["approved"].map({True: "active", False: "pending"})
     result["deleted_date"] = pd.NaT
     result["deleted_by"] = None
 
@@ -440,6 +442,8 @@ def main():
         # Ensure columns exist in existing data (backward compat with old parquet)
         if "status" not in existing.columns:
             existing["status"] = "active"
+        if "approved" not in existing.columns:
+            existing["approved"] = existing["status"].isin(["active", "deleted"])
         if "deleted_date" not in existing.columns:
             existing["deleted_date"] = pd.NaT
         if "deleted_by" not in existing.columns:
@@ -482,8 +486,9 @@ def main():
     result.to_parquet(OUTPUT_PATH, index=False)
     active_count = (result["status"] == "active").sum()
     deleted_count = (result["status"] == "deleted").sum()
+    pending_count = (result["status"] == "pending").sum()
     print(f"\nSaved {len(result)} stories to {OUTPUT_PATH} "
-          f"({active_count} active, {deleted_count} deleted)")
+          f"({active_count} active, {deleted_count} deleted, {pending_count} pending)")
 
 
 if __name__ == "__main__":

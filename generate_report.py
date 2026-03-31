@@ -265,6 +265,9 @@ def build_executive_summary(wb, con, cols):
     deleted_stories = con.execute("""
         SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'deleted'
     """).fetchone()[0]
+    pending_stories = con.execute("""
+        SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'pending'
+    """).fetchone()[0]
 
     # Aggregate click categories
     engagement_clicks = reads + likes
@@ -331,6 +334,7 @@ def build_executive_summary(wb, con, cols):
     write_kpi_row(ws, r, "Total Stories (all time)", stories, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Active Stories", active_stories, fmt=NUM_FMT_INT); row_active = r; r += 1
     write_kpi_row(ws, r, "Deleted Stories", deleted_stories, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Pending / Unapproved Stories", pending_stories, fmt=NUM_FMT_INT); r += 1
     # Formula: Reads / Active Stories
     ws.cell(row=r, column=1, value="Avg. Reads / Active Story").font = Font(bold=True, color=GRAY_VI)
     ws.cell(row=r, column=1).border = THIN_BORDER
@@ -557,17 +561,17 @@ def build_key_performance(wb, con):
     # Unpivot keys: each story can have up to 3 keys, we need one row per key
     if has_split_keys:
         key_union = """
-            SELECT story_id, TRIM(story_key1) as key FROM story_meta WHERE TRIM(COALESCE(story_key1, '')) != ''
+            SELECT story_id, TRIM(story_key1) as key FROM story_meta WHERE status != 'pending' AND TRIM(COALESCE(story_key1, '')) != ''
             UNION ALL
-            SELECT story_id, TRIM(story_key2) FROM story_meta WHERE TRIM(COALESCE(story_key2, '')) != ''
+            SELECT story_id, TRIM(story_key2) FROM story_meta WHERE status != 'pending' AND TRIM(COALESCE(story_key2, '')) != ''
             UNION ALL
-            SELECT story_id, TRIM(story_key3) FROM story_meta WHERE TRIM(COALESCE(story_key3, '')) != ''
+            SELECT story_id, TRIM(story_key3) FROM story_meta WHERE status != 'pending' AND TRIM(COALESCE(story_key3, '')) != ''
         """
     else:
         key_union = """
             SELECT story_id, TRIM(UNNEST(string_split(keys, ','))) as key
             FROM story_meta
-            WHERE keys IS NOT NULL AND TRIM(keys) != ''
+            WHERE status != 'pending' AND keys IS NOT NULL AND TRIM(keys) != ''
         """
 
     rows = con.execute(f"""
