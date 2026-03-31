@@ -571,8 +571,8 @@ def build_key_performance(wb, con):
                 COUNT(CASE WHEN e.action_type = 'Read' THEN 1 END) as reads,
                 COUNT(DISTINCT CASE WHEN e.action_type = 'Read' THEN e.person_hash END) as unique_readers,
                 COUNT(CASE WHEN e.action_type = 'Like' THEN 1 END) as likes,
-                COUNT(CASE WHEN e.action_type IN ('Read', 'Like') THEN 1 END) as engagements,
-                COUNT(DISTINCT CASE WHEN e.action_type IN ('Read', 'Like') THEN e.person_hash END) as engaged_visitors
+                COUNT(CASE WHEN e.action_type IN ('Read', 'Like') THEN 1 END) as interactions,
+                COUNT(DISTINCT CASE WHEN e.action_type IN ('Read', 'Like') THEN e.person_hash END) as active_visitors
             FROM story_keys sk
             LEFT JOIN events e ON sk.story_id = e.story_id
                 AND e.action_type IN ('Read', 'Like')
@@ -581,19 +581,19 @@ def build_key_performance(wb, con):
         SELECT
             key,
             stories,
-            engagements,
-            engaged_visitors,
+            interactions,
+            active_visitors,
             reads,
             likes
         FROM key_engagement
         WHERE key IS NOT NULL AND TRIM(key) != ''
-        ORDER BY engagements DESC
+        ORDER BY interactions DESC
     """).fetchall()
 
-    # Col: A=Key B=Stories C=Engagements D=EngVisitors E=Reads F=Likes
+    # Col: A=Key B=Stories C=Interactions D=ActiveVisitors E=Reads F=Likes
     #      G=LikeRate H=AvgReads/Story I=AvgLikes/Story
     headers = [
-        "Key", "Stories", "Engagements", "Engaged Visitors", "Reads", "Likes",
+        "Key", "Stories", "Interactions", "Active Visitors", "Reads", "Likes",
         "Like Rate", "Avg. Reads / Story", "Avg. Likes / Story"
     ]
     fmt_data = {
