@@ -614,33 +614,33 @@ def build_key_performance(wb, con):
 
 
 def build_division_engagement(wb, con, cols):
-    """Tab 4: Division Engagement."""
-    ws = wb.create_sheet("Division Engagement")
+    """Tab 4: Division Interactions."""
+    ws = wb.create_sheet("Division Interactions")
     ws.sheet_properties.tabColor = GRAY_IV
 
     if "visitor_division" not in cols:
         ws.cell(row=1, column=1, value="No organizational data available (visitor_division missing)")
-        log("  Tab 4: Division Engagement (skipped — no org data)")
+        log("  Tab 4: Division Interactions (skipped — no org data)")
         return
 
     rows = con.execute("""
         SELECT
             COALESCE(visitor_division, '(Unknown)') as division,
-            COUNT(DISTINCT person_hash) as engaged_visitors,
-            COUNT(*) as engagements,
+            COUNT(DISTINCT person_hash) as active_visitors,
+            COUNT(*) as interactions,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
         FROM events
         WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_division, '(Unknown)')
-        ORDER BY engaged_visitors DESC
+        ORDER BY active_visitors DESC
     """).fetchall()
 
-    # Col: A=Division B=EngVisitors C=Engagements D=Reads E=Likes
-    #      F=Eng/Visitor G=LikeRate H=%ofTotal
+    # Col: A=Division B=ActiveVisitors C=Interactions D=Reads E=Likes
+    #      F=Int/Visitor G=LikeRate H=%ofTotal
     headers = [
-        "Division", "Engaged Visitors", "Engagements", "Reads", "Likes",
-        "Engagements / Visitor", "Like Rate", "% of Total"
+        "Division", "Active Visitors", "Interactions", "Reads", "Likes",
+        "Interactions / Visitor", "Like Rate", "% of Total"
     ]
     fmt_data = {1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT}
 
@@ -674,37 +674,37 @@ def build_division_engagement(wb, con, cols):
     write_formula(ws, total_row, 8, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
 
     finalize_sheet(ws)
-    log("  Tab 4: Division Engagement")
+    log("  Tab 4: Division Interactions")
 
 
 def build_region_engagement(wb, con, cols):
-    """Tab 5: Region Engagement."""
-    ws = wb.create_sheet("Region Engagement")
+    """Tab 5: Region Interactions."""
+    ws = wb.create_sheet("Region Interactions")
     ws.sheet_properties.tabColor = GRAY_IV
 
     if "visitor_region" not in cols:
         ws.cell(row=1, column=1, value="No regional data available (visitor_region missing)")
-        log("  Tab 5: Region Engagement (skipped — no region data)")
+        log("  Tab 5: Region Interactions (skipped — no region data)")
         return
 
     rows = con.execute("""
         SELECT
             COALESCE(visitor_region, '(Unknown)') as region,
-            COUNT(DISTINCT person_hash) as engaged_visitors,
-            COUNT(*) as engagements,
+            COUNT(DISTINCT person_hash) as active_visitors,
+            COUNT(*) as interactions,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
             COUNT(CASE WHEN action_type = 'Like' THEN 1 END) as likes
         FROM events
         WHERE action_type IN ('Read', 'Like')
         GROUP BY COALESCE(visitor_region, '(Unknown)')
-        ORDER BY engaged_visitors DESC
+        ORDER BY active_visitors DESC
     """).fetchall()
 
-    # Col: A=Region B=EngVisitors C=Engagements D=Reads E=Likes
-    #      F=Eng/Visitor G=LikeRate H=%ofTotal
+    # Col: A=Region B=ActiveVisitors C=Interactions D=Reads E=Likes
+    #      F=Int/Visitor G=LikeRate H=%ofTotal
     headers = [
-        "Region", "Engaged Visitors", "Engagements", "Reads", "Likes",
-        "Engagements / Visitor", "Like Rate", "% of Total"
+        "Region", "Active Visitors", "Interactions", "Reads", "Likes",
+        "Interactions / Visitor", "Like Rate", "% of Total"
     ]
     fmt_data = {1: NUM_FMT_INT, 2: NUM_FMT_INT, 3: NUM_FMT_INT, 4: NUM_FMT_INT}
 
@@ -736,7 +736,7 @@ def build_region_engagement(wb, con, cols):
     write_formula(ws, total_row, 8, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
 
     finalize_sheet(ws)
-    log("  Tab 5: Region Engagement")
+    log("  Tab 5: Region Interactions")
 
 
 def build_hourly_weekday(wb, con):
