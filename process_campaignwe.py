@@ -524,6 +524,13 @@ def correct_deleted_dates_from_events(con, story_metadata_path):
         if not mask.any():
             continue
 
+        # SharePoint is source of truth: if story is approved (active), skip —
+        # it was likely restored after a test deletion or accidental delete
+        is_approved = meta.loc[mask, "approved"].iloc[0] if "approved" in meta.columns else False
+        if is_approved:
+            log(f"    Skipping story {sid}: approved in SharePoint (delete event ignored)")
+            continue
+
         current_status = meta.loc[mask, "status"].iloc[0]
         current_date = meta.loc[mask, "deleted_date"].iloc[0]
         new_date = evt["delete_date"]
