@@ -534,6 +534,7 @@ def main():
         print()
     print(f"  │ Total:    {len(result):>3}")
     print(f"  └─────────────────────────────────────────────────")
+    print(f"  → {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":
