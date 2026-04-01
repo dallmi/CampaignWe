@@ -511,10 +511,29 @@ def main():
 
     result.to_parquet(OUTPUT_PATH, index=False)
     active_count = (result["status"] == "active").sum()
-    deleted_count = (result["status"] == "deleted").sum()
     pending_count = (result["status"] == "pending").sum()
-    print(f"\nSaved {len(result)} stories to {OUTPUT_PATH} "
-          f"({active_count} active, {deleted_count} deleted, {pending_count} pending)")
+    deleted_total = (result["status"] == "deleted").sum()
+
+    print(f"\n  Saved {len(result)} stories to {OUTPUT_PATH.name}")
+    print(f"  ┌─────────────────────────────────────────────────")
+    print(f"  │ Active:   {active_count:>3}  (Status#Id = 1, approved)")
+    print(f"  │ Pending:  {pending_count:>3}  (Status#Id = 0, awaiting approval)")
+    print(f"  │ Deleted:  {deleted_total:>3}", end="")
+    if deleted_total > 0:
+        # Break down deletion sources
+        has_filter = FILTER_COLUMN in result.columns
+        sp_count = int((result[result["status"] == "deleted"][FILTER_COLUMN] == 2).sum()) if has_filter else 0
+        soft_count = deleted_total - sp_count
+        parts = []
+        if sp_count > 0:
+            parts.append(f"{sp_count} via Status#Id = 2")
+        if soft_count > 0:
+            parts.append(f"{soft_count} vanished between runs")
+        print(f"  ({', '.join(parts)})")
+    else:
+        print()
+    print(f"  │ Total:    {len(result):>3}")
+    print(f"  └─────────────────────────────────────────────────")
 
 
 if __name__ == "__main__":
