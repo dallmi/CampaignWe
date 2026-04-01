@@ -22,9 +22,9 @@ Input folder: input/
     Overlapping time ranges are handled via upsert on the primary key.
 
 Output:
-    - data/campaignwe.db                    (DuckDB database; events table contains person_hash, no plain GPN/email)
-    - output/events_anonymized.parquet      (GPN hashed as person_hash, email dropped; safe for reporting)
-    - output/excluded_events_YYYY_MM_DD.xlsx (details of all excluded events for transparency)
+    - data/campaignwe.db                                  (DuckDB database; events table contains person_hash, no plain GPN/email)
+    - output/data/events_anonymized.parquet                (GPN hashed as person_hash, email dropped; safe for reporting)
+    - output/reports/YYYYMM/excluded_events_YYYY_MM_DD.xlsx (details of all excluded events for transparency)
 
 PII handling:
     Input files are deleted after successful processing.
@@ -1054,8 +1054,11 @@ def export_parquet_files(con, output_dir):
             """).df()
 
         if len(summary_df) > 0:
-            today = datetime.now().strftime("%Y_%m_%d")
-            excluded_xlsx = output_dir / f'excluded_events_{today}.xlsx'
+            now = datetime.now()
+            today = now.strftime("%Y_%m_%d")
+            reports_dir = output_dir.parent / 'reports' / now.strftime("%Y%m")
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            excluded_xlsx = reports_dir / f'excluded_events_{today}.xlsx'
             with pd.ExcelWriter(excluded_xlsx, engine='openpyxl') as writer:
                 summary_df.to_excel(writer, sheet_name='Summary', index=False)
                 detail_df.to_excel(writer, sheet_name='Detail', index=False)
@@ -1423,18 +1426,19 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
     input_dir = script_dir / 'input'
     data_dir = script_dir / 'data'
     output_dir = script_dir / 'output'
+    output_data_dir = output_dir / 'data'
     db_path = data_dir / 'campaignwe.db'
 
     # HR history parquet from SearchAnalytics
     hr_parquet_path = script_dir.parent / 'SearchAnalytics' / 'output' / 'hr_history.parquet'
 
     # Story titles from SharePoint
-    story_titles_path = output_dir / 'story_metadata.parquet'
+    story_titles_path = output_data_dir / 'story_metadata.parquet'
 
     # Create directories
     input_dir.mkdir(parents=True, exist_ok=True)
     data_dir.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    output_data_dir.mkdir(parents=True, exist_ok=True)
 
     log("=" * 60)
     log("CAMPAIGNWE CLICK EVENT PROCESSING")
@@ -1673,10 +1677,10 @@ def process_campaignwe(input_file=None, full_refresh=False, delete_input=False):
         correct_deleted_dates_from_events(con, story_titles_path)
 
     # Export Parquet files
-    export_parquet_files(con, output_dir)
+    export_parquet_files(con, output_data_dir)
 
     # Print summary
-    print_summary(con, output_dir)
+    print_summary(con, output_data_dir)
 
     # Cleanup: drop tables that are re-created each run to reduce DB size
     # hr_history is re-loaded from parquet each run and only needed during the join

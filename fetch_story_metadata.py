@@ -33,7 +33,7 @@ Input priority:
   2. Local fallback: input/ folder (any .xlsx or .csv)
 
 Usage:
-    python fetch_story_metadata.py              # convert and save to output/story_metadata.parquet
+    python fetch_story_metadata.py              # convert and save to output/data/story_metadata.parquet
     python fetch_story_metadata.py --preview    # read and print without saving
 
 Prerequisites:
@@ -50,7 +50,7 @@ import pandas as pd
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 LOCAL_INPUT_DIR = SCRIPT_DIR / "input"
-OUTPUT_PATH = SCRIPT_DIR / "output" / "story_metadata.parquet"
+OUTPUT_PATH = SCRIPT_DIR / "output" / "data" / "story_metadata.parquet"
 HR_HISTORY_PATH = SCRIPT_DIR.parent / "SearchAnalytics" / "output" / "hr_history.parquet"
 
 # Relative path inside OneDrive to the Power Automate output folder

@@ -12,11 +12,11 @@ Usage:
     python generate_report.py --date-to 2026-03-31
 
 Input:
-    - output/events_anonymized.parquet
-    - output/story_metadata.parquet
+    - output/data/events_anonymized.parquet
+    - output/data/story_metadata.parquet
 
 Output:
-    - output/campaignwe_report_YYYY_MM_DD.xlsx (9 tabs)
+    - output/reports/YYYYMM/campaignwe_report_YYYY_MM_DD.xlsx (9 tabs)
 
 Tabs:
     1. Executive Summary  — KPIs: reach, interactions, content, submission funnel
@@ -1346,12 +1346,15 @@ def main():
     args = parser.parse_args()
 
     script_dir = Path(__file__).resolve().parent
-    output_dir = script_dir / "output"
-    events_path = output_dir / "events_anonymized.parquet"
-    metadata_path = output_dir / "story_metadata.parquet"
+    data_dir = script_dir / "output" / "data"
+    events_path = data_dir / "events_anonymized.parquet"
+    metadata_path = data_dir / "story_metadata.parquet"
 
-    today = date.today().strftime("%Y_%m_%d")
-    output_path = Path(args.output) if args.output else output_dir / f"campaignwe_report_{today}.xlsx"
+    now = date.today()
+    today = now.strftime("%Y_%m_%d")
+    reports_dir = script_dir / "output" / "reports" / now.strftime("%Y%m")
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    output_path = Path(args.output) if args.output else reports_dir / f"campaignwe_report_{today}.xlsx"
 
     log("=" * 64)
     log("  CampaignWe XLSX Report Generator")

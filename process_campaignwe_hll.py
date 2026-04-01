@@ -19,16 +19,16 @@ Input:
     ../SearchAnalytics/output/hr_history.parquet
 
 Output:
-    output/events_hll.parquet
+    output/data/events_hll.parquet
         Columns: session_date, story_id, action_type,
                  visitor_division, visitor_unit, visitor_area, visitor_sector, visitor_region,
                  event_count, uv_sketch (BLOB)
         No GPN, no email, no person_hash.
 
-    output/events_hll_uv.parquet
+    output/data/events_hll_uv.parquet
         Single-dimension UV aggregates for the HTML comparison dashboard.
 
-    output/events_hll_powerbi.parquet
+    output/data/events_hll_powerbi.parquet
         Pre-computed UV for all 32 combinations of:
             month × story_id × action_type × visitor_division × visitor_region
         Power BI fallback — no person_hash required.
@@ -737,7 +737,7 @@ def compare_pipelines(output_dir):
 def process_campaignwe_hll(run_compare=False):
     script_dir = Path(__file__).parent
     input_dir  = script_dir / 'input'
-    output_dir = script_dir / 'output'
+    output_dir = script_dir / 'output' / 'data'
     hr_parquet_path = script_dir.parent / 'SearchAnalytics' / 'output' / 'hr_history.parquet'
 
     log("=" * 64)

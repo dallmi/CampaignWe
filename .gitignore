@@ -11,7 +11,8 @@ data/*.db
 data/*.db.wal
 
 # Output files
-output/*.parquet
+output/data/
+output/reports/
 
 # Auth token cache
 config/.token_cache.bin
