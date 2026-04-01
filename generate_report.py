@@ -353,7 +353,7 @@ def build_executive_summary(wb, con, cols):
     write_kpi_row(ws, r, "Total Stories (all time)", stories, fmt=NUM_FMT_INT); r += 1
     write_kpi_row(ws, r, "Active Stories", active_stories, fmt=NUM_FMT_INT); row_active = r; r += 1
     write_kpi_row(ws, r, "Deleted Stories", deleted_stories, fmt=NUM_FMT_INT); r += 1
-    write_kpi_row(ws, r, "Pending / Unapproved Stories", pending_stories, fmt=NUM_FMT_INT); r += 1
+    write_kpi_row(ws, r, "Pending Stories", pending_stories, fmt=NUM_FMT_INT); r += 1
     # Formula: Reads / Active Stories
     ws.cell(row=r, column=1, value="Avg. Reads / Active Story").font = Font(bold=True, color=GRAY_VI)
     ws.cell(row=r, column=1).border = THIN_BORDER
