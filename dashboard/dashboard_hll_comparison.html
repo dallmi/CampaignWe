@@ -387,7 +387,7 @@
             console.error(err);
             document.getElementById('loadingState').innerHTML =
                 `<div class="error-message"><strong>Failed to load:</strong><br>${err.message}<br><br>
-                Make sure events_anonymized.parquet and events_hll_uv.parquet are in the output/ folder
+                Make sure events_anonymized.parquet and events_hll_uv.parquet are in the output/data/ folder
                 and that you are serving this file via a local web server.</div>`;
             updateStatus('error', 'Error');
         }
@@ -395,7 +395,7 @@
 
     async function loadParquetFiles() {
         const base  = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
-        const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+        const paths = [`${base}/../output/data/`, `${window.location.origin}/output/data/`, `${base}/output/data/`];
 
         async function load(view, file, msg) {
             // Try fetch + buffer first (works with simple HTTP servers without range request support)
@@ -726,7 +726,7 @@
     // Load story metadata if available (same pattern as main dashboard)
     async function tryLoadStoryMeta() {
         const base  = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
-        const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+        const paths = [`${base}/../output/data/`, `${window.location.origin}/output/data/`, `${base}/output/data/`];
         for (const p of paths) {
             try {
                 await conn.query(`CREATE VIEW story_meta AS SELECT * FROM read_parquet('${p}story_metadata.parquet')`);

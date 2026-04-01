@@ -826,7 +826,7 @@
 
         async function loadParquetFiles() {
             const base = window.location.origin + window.location.pathname.replace(/\/[^\/]*$/, '');
-            const paths = [`${base}/../output/`, `${window.location.origin}/output/`, `${base}/output/`];
+            const paths = [`${base}/../output/data/`, `${window.location.origin}/output/data/`, `${base}/output/data/`];
 
             async function load(view, file, msg) {
                 // First try registering via fetch + buffer (works with simple HTTP servers
