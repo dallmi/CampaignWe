@@ -1042,10 +1042,13 @@ def export_parquet_files(con, output_dir):
             sm = pd.read_parquet(story_meta_path)
             sm["story_id"] = sm["story_id"].astype(str).str.strip()
             sm_cols = {"story_id": "story_id"}
-            if "story_title" in sm.columns:
-                sm_cols["story_title"] = "meta_story_title"
-            if "status" in sm.columns:
-                sm_cols["status"] = "meta_status"
+            for col, alias in [("story_title", "meta_story_title"),
+                               ("status", "meta_status"),
+                               ("modified", "meta_modified"),
+                               ("deleted_date", "meta_deleted_date")]:
+                if col in sm.columns:
+                    sm[col] = sm[col].astype(str).replace("NaT", "").replace("None", "")
+                    sm_cols[col] = alias
             if "approved" in sm.columns:
                 sm["approved_label"] = sm["approved"].map({True: "approved", False: "not approved"})
                 sm_cols["approved_label"] = "meta_approved"
