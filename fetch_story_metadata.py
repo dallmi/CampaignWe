@@ -5,10 +5,13 @@ The CSV is automatically synced by a Power Automate flow from a SharePoint list
 into a OneDrive folder. This script reads it, marks approval status, and saves
 story_metadata.parquet with ID, title, author metadata, and approval columns.
 
-Approval: Stories with Status#Id == 1 are marked as approved. All other stories
-are marked as pending (approved=False, status='pending'). Only approved stories
-are used for event matching in process_campaignwe.py; pending stories are counted
-but excluded from reports.
+Status IDs from SharePoint:
+    0 = Submitted → status='pending'  (awaiting approval, excluded from reports)
+    1 = Approved  → status='active'   (published, included in reports)
+    2 = Deleted   → status='deleted'  (removed via SharePoint, excluded from reports)
+
+Only approved/active stories are used for event matching in process_campaignwe.py.
+Pending and deleted story counts are shown in the report for transparency.
 
 Soft-delete: Stories that were present in a previous run but are no longer in the
 SharePoint list are marked with a deleted_date (date of disappearance) and kept in
@@ -397,15 +400,19 @@ def main():
         if col_name in result.columns:
             result[col_name] = result[col_name].apply(parse_sp_lookup)
 
-    # Mark approval status (status_id == 1 = approved, anything else = pending)
+    # Map status_id to status and approved flag
+    # Status IDs: 0 = Submitted (pending), 1 = Approved (active), 2 = Deleted
+    STATUS_MAP = {0: "pending", 1: "active", 2: "deleted"}
     if FILTER_COLUMN in result.columns:
         result[FILTER_COLUMN] = pd.to_numeric(result[FILTER_COLUMN], errors="coerce")
-        approved = (result[FILTER_COLUMN] == FILTER_VALUE).sum()
-        pending = len(result) - approved
-        result["approved"] = (result[FILTER_COLUMN] == FILTER_VALUE)
-        print(f"  Approval status: {approved} approved, {pending} pending/unapproved")
+        result["status"] = result[FILTER_COLUMN].map(STATUS_MAP).fillna("pending")
+        result["approved"] = (result["status"] == "active")
+        counts = result["status"].value_counts()
+        parts = [f"{int(counts.get(s, 0))} {s}" for s in ["active", "pending", "deleted"] if counts.get(s, 0) > 0]
+        print(f"  Status breakdown: {', '.join(parts)}")
     else:
         result["approved"] = True
+        result["status"] = "active"
         print(f"  Warning: filter column '{FILTER_COLUMN}' not available, marking all as approved")
 
     # Split comma-separated keys into story_key1, story_key2, story_key3
@@ -427,10 +434,13 @@ def main():
 
     print(f"  Mapped {len(result)} stories")
 
-    # Add status column — only approved stories are "active"
-    result["status"] = result["approved"].map({True: "active", False: "pending"})
+    # Initialize deletion tracking columns
     result["deleted_date"] = pd.NaT
     result["deleted_by"] = None
+    # Stories with status_id=2 are deleted via SharePoint — set deleted_date to modified date if available
+    sp_deleted = result["status"] == "deleted"
+    if sp_deleted.any() and "modified" in result.columns:
+        result.loc[sp_deleted, "deleted_date"] = result.loc[sp_deleted, "modified"]
 
     if preview or result.empty:
         print("\n--- Story Titles ---")
@@ -461,26 +471,31 @@ def main():
         if "deleted_by" not in existing.columns:
             existing["deleted_by"] = None
 
-        active_ids = set(result["story_id"].tolist())
+        current_ids = set(result["story_id"].tolist())
         existing_ids = set(existing["story_id"].tolist())
 
-        # Stories that were in existing but are NOT in current fetch → newly deleted
-        newly_deleted_ids = existing_ids - active_ids
-        # Stories that were already marked deleted previously (preserve their corrected dates)
-        previously_deleted = existing[existing["status"] == "deleted"].copy()
+        # Stories in previous parquet but NOT in current SharePoint fetch → soft-deleted
+        vanished_ids = existing_ids - current_ids
+        # Previously deleted stories (preserve their corrected dates from App Insights)
+        previously_deleted = existing[
+            (existing["status"] == "deleted") &
+            (~existing["story_id"].isin(current_ids))  # only those not in current fetch
+        ].copy()
 
-        if newly_deleted_ids:
+        if vanished_ids:
             today = datetime.date.today()
             newly_deleted = existing[
-                (existing["story_id"].isin(newly_deleted_ids)) &
+                (existing["story_id"].isin(vanished_ids)) &
                 (existing["status"] != "deleted")  # don't re-mark already deleted
             ].copy()
-            newly_deleted["status"] = "deleted"
-            newly_deleted["deleted_date"] = today  # approximate — corrected later by process_campaignwe.py
-            print(f"  Soft-deleted {len(newly_deleted)} stories (no longer in SharePoint): "
-                  f"IDs {sorted(newly_deleted_ids)}")
+            if len(newly_deleted) > 0:
+                newly_deleted["status"] = "deleted"
+                newly_deleted["approved"] = False
+                newly_deleted["deleted_date"] = today  # approximate — corrected later by process_campaignwe.py
+                print(f"  Soft-deleted {len(newly_deleted)} stories (vanished from SharePoint): "
+                      f"IDs {sorted(newly_deleted['story_id'].tolist())}")
 
-            # Combine: current active + newly deleted + previously deleted
+            # Combine: current fetch + newly soft-deleted + previously deleted (not in current)
             result = pd.concat([result, newly_deleted, previously_deleted],
                                ignore_index=True)
         elif len(previously_deleted) > 0:
@@ -488,8 +503,7 @@ def main():
             result = pd.concat([result, previously_deleted], ignore_index=True)
             print(f"  Carrying forward {len(previously_deleted)} previously deleted stories")
 
-        # Deduplicate by story_id (active takes precedence if a deleted story reappears)
-        result = result.sort_values("status", ascending=True)  # "active" before "deleted"
+        # Deduplicate by story_id — prefer current data (first in concat order)
         result = result.drop_duplicates(subset=["story_id"], keep="first")
 
     # Convert deleted_date to proper date type

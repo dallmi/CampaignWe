@@ -1313,9 +1313,9 @@ def build_glossary(wb):
 
     # --- Story Status ---
     heading("Story Status")
-    term("Active Stories", "Stories currently published and visible on the platform (approved, Status#Id = 1).")
-    term("Deleted Stories", "Stories removed from the platform. Historical data up to the deletion date is preserved.")
-    term("Pending / Unapproved", "Stories in SharePoint that have not been approved (Status#Id != 1). Excluded from all report data.")
+    term("Active Stories", "Stories currently published and visible on the platform (Status#Id = 1, Approved).")
+    term("Deleted Stories", "Stories removed from the platform (Status#Id = 2 or vanished from SharePoint). Historical data up to the deletion date is preserved.")
+    term("Pending / Unapproved", "Stories submitted but not yet approved (Status#Id = 0, Submitted). Excluded from all report data.")
     blank()
 
     # --- Data Notes ---
