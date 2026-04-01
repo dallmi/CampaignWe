@@ -1035,8 +1035,24 @@ def export_parquet_files(con, output_dir):
             ORDER BY exclusion_reason, event_count DESC
         """).df()
 
-        # Enrich detail rows with available metadata per story_id
-        if meta_cols:
+        # Enrich detail rows with metadata from story_metadata.parquet
+        # (story_titles table is already dropped at this point, read from file)
+        story_meta_path = output_dir / 'story_metadata.parquet'
+        if story_meta_path.exists():
+            sm = pd.read_parquet(story_meta_path)
+            sm["story_id"] = sm["story_id"].astype(str).str.strip()
+            sm_cols = {"story_id": "story_id"}
+            if "story_title" in sm.columns:
+                sm_cols["story_title"] = "meta_story_title"
+            if "status" in sm.columns:
+                sm_cols["status"] = "meta_status"
+            if "approved" in sm.columns:
+                sm["approved_label"] = sm["approved"].map({True: "approved", False: "not approved"})
+                sm_cols["approved_label"] = "meta_approved"
+            sm_lookup = sm[list(sm_cols.keys())].drop_duplicates(subset=["story_id"], keep="first")
+            sm_lookup = sm_lookup.rename(columns=sm_cols)
+            detail_df = detail_df.merge(sm_lookup, on='story_id', how='left')
+        elif meta_cols:
             meta_df = con.execute(f"""
                 SELECT COALESCE(story_id, '(none)') as story_id
                     {meta_select_prefix}
