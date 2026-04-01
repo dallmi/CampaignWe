@@ -274,10 +274,10 @@ def build_executive_summary(wb, con, cols):
         FROM events
     """).fetchone()
 
-    first_date, last_date, duration, total, uv, sessions, stories = kpis[:7]
+    first_date, last_date, duration, total, uv, sessions, _stories_from_events = kpis[:7]
     reads, likes, submits, open_forms, cancels, deletes, invites_sent, invites_opened = kpis[7:]
 
-    # Story counts from metadata
+    # Story counts from metadata (source of truth, not events)
     active_stories = con.execute("""
         SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'active'
     """).fetchone()[0]
@@ -287,6 +287,7 @@ def build_executive_summary(wb, con, cols):
     pending_stories = con.execute("""
         SELECT COUNT(DISTINCT story_id) FROM story_meta WHERE status = 'pending'
     """).fetchone()[0]
+    stories = active_stories + deleted_stories
 
     # Aggregate click categories
     engagement_clicks = reads + likes
