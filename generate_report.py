@@ -129,13 +129,13 @@ def write_data_rows(ws, start_row, rows, col_start=1, fmt_map=None):
                 cell.number_format = NUM_FMT_INT
 
 
-def write_section_header(ws, row, text, col_span=2):
+def write_section_header(ws, row, text, col_span=2, col_start=1):
     """Write a section header spanning multiple columns."""
-    cell = ws.cell(row=row, column=1, value=text)
+    cell = ws.cell(row=row, column=col_start, value=text)
     cell.font = SECTION_FONT
     cell.fill = SECTION_FILL
     cell.border = THIN_BORDER
-    for ci in range(2, col_span + 1):
+    for ci in range(col_start + 1, col_start + col_span):
         c = ws.cell(row=row, column=ci)
         c.fill = SECTION_FILL
         c.border = THIN_BORDER
@@ -478,6 +478,95 @@ def build_story_performance(wb, con):
     ws = wb.create_sheet("Story Performance")
     ws.sheet_properties.tabColor = GRAY_IV
 
+    # ------------------------------------------------------------------
+    # Summary: Stories by Author Division & Region (side-by-side)
+    # ------------------------------------------------------------------
+    div_rows = con.execute("""
+        SELECT COALESCE(author_division, '(Unknown)') as division, COUNT(*) as stories
+        FROM story_meta WHERE status != 'pending'
+        GROUP BY COALESCE(author_division, '(Unknown)')
+        ORDER BY stories DESC
+    """).fetchall()
+
+    region_rows = con.execute("""
+        SELECT COALESCE(author_region, '(Unknown)') as region, COUNT(*) as stories
+        FROM story_meta WHERE status != 'pending'
+        GROUP BY COALESCE(author_region, '(Unknown)')
+        ORDER BY stories DESC
+    """).fetchall()
+
+    r = 1
+    # Section headers side-by-side
+    write_section_header(ws, r, "STORIES BY AUTHOR DIVISION", 3)
+    write_section_header(ws, r, "STORIES BY AUTHOR REGION", 3, col_start=5)
+    r += 1
+
+    # Division table (cols A-C)
+    write_header_row(ws, r, ["Division", "Stories", "% of Total"], col_start=1)
+    # Region table (cols E-G)
+    write_header_row(ws, r, ["Region", "Stories", "% of Total"], col_start=5)
+    r += 1
+
+    div_start = r
+    for ri, (div, count) in enumerate(div_rows):
+        fill = ALT_FILL if ri % 2 == 1 else None
+        cell = ws.cell(row=r, column=1, value=div)
+        cell.border = THIN_BORDER
+        if fill:
+            cell.fill = fill
+        cell = ws.cell(row=r, column=2, value=count)
+        cell.border = THIN_BORDER
+        cell.number_format = NUM_FMT_INT
+        if fill:
+            cell.fill = fill
+        r += 1
+    div_total_row = r
+    ws.cell(row=r, column=1, value="TOTAL").font = TOTAL_FONT
+    ws.cell(row=r, column=1).fill = TOTAL_FILL
+    ws.cell(row=r, column=1).border = THIN_BORDER
+    write_formula(ws, r, 2, f"=SUM(B{div_start}:B{div_total_row - 1})",
+                  fmt=NUM_FMT_INT, fill=TOTAL_FILL, bold=True)
+    # % of Total formulas for division rows
+    for ri in range(len(div_rows)):
+        row_num = div_start + ri
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, row_num, 3, f"=IF(B${div_total_row}=0,0,B{row_num}/B${div_total_row})",
+                      fmt=NUM_FMT_PCT, fill=fill)
+    write_formula(ws, div_total_row, 3, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
+
+    # Region table (cols E-G), starting at same row as division data
+    r_reg = div_start
+    for ri, (reg, count) in enumerate(region_rows):
+        fill = ALT_FILL if ri % 2 == 1 else None
+        cell = ws.cell(row=r_reg, column=5, value=reg)
+        cell.border = THIN_BORDER
+        if fill:
+            cell.fill = fill
+        cell = ws.cell(row=r_reg, column=6, value=count)
+        cell.border = THIN_BORDER
+        cell.number_format = NUM_FMT_INT
+        if fill:
+            cell.fill = fill
+        r_reg += 1
+    reg_total_row = r_reg
+    ws.cell(row=r_reg, column=5, value="TOTAL").font = TOTAL_FONT
+    ws.cell(row=r_reg, column=5).fill = TOTAL_FILL
+    ws.cell(row=r_reg, column=5).border = THIN_BORDER
+    write_formula(ws, r_reg, 6, f"=SUM(F{div_start}:F{reg_total_row - 1})",
+                  fmt=NUM_FMT_INT, fill=TOTAL_FILL, bold=True)
+    for ri in range(len(region_rows)):
+        row_num = div_start + ri
+        fill = ALT_FILL if ri % 2 == 1 else None
+        write_formula(ws, row_num, 7, f"=IF(F${reg_total_row}=0,0,F{row_num}/F${reg_total_row})",
+                      fmt=NUM_FMT_PCT, fill=fill)
+    write_formula(ws, reg_total_row, 7, "=1", fmt=NUM_FMT_PCT, fill=TOTAL_FILL, bold=True)
+
+    # Start detail table after the longer of the two summary tables
+    detail_start = max(div_total_row, reg_total_row) + 2
+
+    # ------------------------------------------------------------------
+    # Detail: Story Performance table
+    # ------------------------------------------------------------------
     rows = con.execute("""
         WITH story_events AS (
             SELECT
@@ -526,12 +615,10 @@ def build_story_performance(wb, con):
         11: NUM_FMT_INT
     }
 
-    write_header_row(ws, 1, headers)
-    # Write data without the formula columns (Like Rate=col K, Reads/Day=col M)
+    write_header_row(ws, detail_start, headers)
     for ri, row_data in enumerate(rows):
-        r = ri + 2
-        # Write cols A-J (indices 0-9)
-        data_cells = list(row_data[:10])  # ID through Likes
+        r = detail_start + ri + 1
+        data_cells = list(row_data[:10])
         fill = ALT_FILL if ri % 2 == 1 else None
         for ci, val in enumerate(data_cells):
             cell = ws.cell(row=r, column=ci + 1, value=val)
@@ -542,17 +629,13 @@ def build_story_performance(wb, con):
                 cell.number_format = fmt[ci]
             elif isinstance(val, int):
                 cell.number_format = NUM_FMT_INT
-        # Like Rate formula: =IF(I{r}=0,0,J{r}/I{r})  (Likes/Unique Readers)
         write_formula(ws, r, 11, f"=IF(I{r}=0,0,J{r}/I{r})", fmt=NUM_FMT_PCT, fill=fill)
-        # Lifespan (col L, index 10 in SQL result)
         cell = ws.cell(row=r, column=12, value=row_data[10])
         cell.border = THIN_BORDER
         cell.number_format = NUM_FMT_INT
         if fill:
             cell.fill = fill
-        # Reads/Day formula: =IF(L{r}=0,"",H{r}/L{r})  (Total Reads/Lifespan)
         write_formula(ws, r, 13, f'=IF(L{r}=0,"",H{r}/L{r})', fmt=NUM_FMT_RATIO, fill=fill)
-        # Median Read Duration (col N, index 11 in SQL result)
         cell = ws.cell(row=r, column=14, value=row_data[11])
         cell.border = THIN_BORDER
         cell.number_format = NUM_FMT_RATIO
