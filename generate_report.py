@@ -260,7 +260,7 @@ def build_executive_summary(wb, con, cols):
               - CASE WHEN DAYOFWEEK(MAX(session_date)) = 7 THEN 1 ELSE 0 END
               as duration_days,
             COUNT(CASE WHEN action_type != 'Cancel' THEN 1 END) as total_interactions,
-            COUNT(DISTINCT person_hash) as unique_visitors,
+            COUNT(DISTINCT CASE WHEN action_type NOT IN ('Cancel', 'Other') THEN person_hash END) as unique_visitors,
             COUNT(DISTINCT session_key) as unique_sessions,
             COUNT(DISTINCT CASE WHEN story_id IS NOT NULL THEN story_id END) as total_stories,
             COUNT(CASE WHEN action_type = 'Read' THEN 1 END) as reads,
@@ -1252,9 +1252,9 @@ def build_glossary(wb):
     # --- Metrics ---
     heading("Metrics")
     term("Total Clicks", "All tracked user interactions excluding Cancel and Other events (Reads, Likes, Form actions, Invites, Deletes).")
-    term("Unique Visitors", "Number of distinct users who performed at least one click.")
+    term("Unique Visitors", "Number of distinct users who performed at least one click (Read, Like, Form, Invite, or Delete). Shown on Executive Summary.")
     term("Unique Sessions", "Number of distinct browsing sessions (one user can have multiple sessions).")
-    term("Active Visitors", "Users who performed at least one Read or Like.")
+    term("Active Visitors", "Subset of Unique Visitors who performed at least one Read or Like. Shown on Division and Region Interactions.")
     term("Interactions", "Total count of Read and Like actions combined.")
     term("Like Rate", "Likes divided by Reads (or Unique Readers). Shows how often readers appreciate a story.")
     term("Reads/Day", "Total Reads divided by story lifespan in business days. Normalizes for story age.")
