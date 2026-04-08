@@ -36,7 +36,7 @@
             --warning-light: #FDF6E3;
             --danger: #BD000C;
             --danger-light: #FFEBE6;
-            --info: #8E8D83;
+            --info: #0C7EC6;
             --info-light: #ECEBE4;
         }
 
@@ -402,8 +402,38 @@
         const COLORS = {
             primary: '#E60000', primaryDark: '#8A000A',
             success: '#6F7A1A', warning: '#E4A911', danger: '#BD000C',
-            info: '#8E8D83', gray: '#7A7870', lightGray: '#CCCABC', dark: '#404040',
+            info: '#0C7EC6', gray: '#7A7870', lightGray: '#CCCABC', dark: '#404040',
         };
+
+        // Canonical entity color maps (consistent across all dashboards)
+        const DIVISION_COLOR_MAP = {
+            'Investment Bank':              '#404040',
+            'Global Wealth Management':     '#B8B3A2',
+            'Asset Management':             '#5A5D5C',
+            'Group Functions':              '#CCCABC',
+            'Personal & Corporate Banking': '#7A7870',
+        };
+        const DIVISION_GRAYS_FALLBACK = ['#8E8D83', '#404040', '#B8B3A2', '#5A5D5C', '#CCCABC', '#7A7870'];
+        let divFallbackIdx = 0;
+        function getDivisionColor(name) {
+            if (DIVISION_COLOR_MAP[name]) return DIVISION_COLOR_MAP[name];
+            const c = DIVISION_GRAYS_FALLBACK[divFallbackIdx % DIVISION_GRAYS_FALLBACK.length];
+            divFallbackIdx++;
+            return c;
+        }
+
+        const REGION_COLORS = {
+            'SWITZERLAND': '#404040',
+            'EMEA':        '#B8B3A2',
+            'AMERICAS':    '#5A5D5C',
+            'APAC':        '#7A7870',
+            'Unknown':     '#CCCABC',
+        };
+
+        const COUNTRY_PALETTE = [
+            '#879420', '#9F8865', '#469A6C', '#AD3E4A', '#8489BD',
+            '#0C7EC6', '#654D16', '#804C95', '#45999C', '#4972AC'
+        ];
 
         const CHART_PALETTE = [
             '#AF8626','#00759E','#879420','#4B2D58','#9F8865',
@@ -1459,8 +1489,16 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
-                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                        { label: 'Clicks', data: values, backgroundColor: labels.map(l => {
+                            if (l === '(unknown)') return COLORS.lightGray;
+                            if (gcrsLevel === 0) return getDivisionColor(l);
+                            return '#404040';
+                        }), borderRadius: 2 },
+                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map(l => {
+                            if (l === '(unknown)') return '#ECEBE4';
+                            if (gcrsLevel === 0) { const c = getDivisionColor(l); return c + '99'; }
+                            return '#B8B3A2';
+                        }), borderRadius: 2 }
                     ]
                 },
                 options: {
@@ -1547,8 +1585,16 @@
                 data: {
                     labels,
                     datasets: [
-                        { label: 'Clicks', data: values, backgroundColor: labels.map(l => l === '(unknown)' ? COLORS.lightGray : '#404040'), borderRadius: 2 },
-                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map(l => l === '(unknown)' ? '#ECEBE4' : '#B8B3A2'), borderRadius: 2 }
+                        { label: 'Clicks', data: values, backgroundColor: labels.map((l, i) => {
+                            if (l === '(unknown)') return COLORS.lightGray;
+                            if (regionLevel === 0) return REGION_COLORS[l] || '#7A7870';
+                            return COUNTRY_PALETTE[i % COUNTRY_PALETTE.length];
+                        }), borderRadius: 2 },
+                        { label: 'Unique Visitors', data: users, backgroundColor: labels.map((l, i) => {
+                            if (l === '(unknown)') return '#ECEBE4';
+                            if (regionLevel === 0) { const c = REGION_COLORS[l] || '#7A7870'; return c + '99'; }
+                            return COUNTRY_PALETTE[i % COUNTRY_PALETTE.length] + '99';
+                        }), borderRadius: 2 }
                     ]
                 },
                 options: {
@@ -1609,7 +1655,7 @@
             const datasets = divNames.map((div, i) => {
                 const divData = data.filter(d => d.div === div);
                 const map = {}; divData.forEach(d => { map[toDateStr(d.date)] = Number(d.users); });
-                return { label: div, data: dates.map(dt => map[dt] || 0), borderColor: CHART_PALETTE[i], tension: 0.3, fill: false };
+                return { label: div, data: dates.map(dt => map[dt] || 0), borderColor: getDivisionColor(div), tension: 0.3, fill: false };
             });
 
             destroyChart('divDaily');
